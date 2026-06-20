@@ -128,7 +128,7 @@ user_name = st.session_state["user_name"]
 # ==========================================
 # DAFTAR EMAIL ADMIN (Bisa Add, Update, Delete)
 ADMIN_EMAILS = [
-    "admin_pmo@gmail.com", 
+    "enter.reza@gmail.com", 
     "manager_pmo@yourcompany.com"
 ]
 
