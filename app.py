@@ -206,7 +206,7 @@ with tab_update:
                 elif new_progress > 0 and new_status == "To Do":
                     new_status = "In Progress"
                     
-                update_btn = st.form_submit_with_button("Save Updates")
+                update_btn = st.form_submit_button("Save Updates")
                 
                 if update_btn:
                     # Mencari indeks baris data yang sesuai dan memperbarui nilainya
