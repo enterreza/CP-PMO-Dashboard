@@ -1,4 +1,5 @@
 streamlit
-PyGithub
 pandas
 plotly
+PyGithub
+streamlit-oauth
