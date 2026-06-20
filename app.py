@@ -28,7 +28,11 @@ else:
 def get_github_file():
     """Mengambil file data tasks.json langsung dari repositori GitHub"""
     try:
-        g = Github(GITHUB_TOKEN)
+        # Menggunakan class Auth agar sesuai dengan standar PyGithub terbaru
+        from github import Auth
+        
+        auth = Auth.Token(GITHUB_TOKEN)
+        g = Github(auth=auth)
         repo = g.get_repo(REPO_NAME)
         try:
             contents = repo.get_contents(FILE_PATH)
