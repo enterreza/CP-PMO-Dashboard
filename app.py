@@ -168,9 +168,24 @@ with tab_update:
                     u_status = st.selectbox("Update Status", ["To Do", "In Progress", "Done"], 
                                             index=["To Do", "In Progress", "Done"].index(task_row["Status"]))
                     u_progress = st.slider("Update Progress (%)", 0, 100, int(task_row["Progress (%)"]))
-                    u_start = st.date_input("Update Start Date", value=pd.to_datetime(task_row["Start Date"]))
-                with col_u2:
-                    u_due = st.date_input("Update Due Date", value=pd.to_datetime(task_row["Due Date"]))
+                    import datetime # Pastikan ini sudah di-import di bagian paling atas jika belum ada
+
+# Validasi Start Date: Jika kosong, gunakan hari ini
+if task_row["Start Date"] == "" or pd.isna(task_row["Start Date"]):
+    default_start = datetime.date.today()
+else:
+    default_start = pd.to_datetime(task_row["Start Date"]).date()
+
+# Validasi Due Date: Jika kosong, gunakan hari ini
+if task_row["Due Date"] == "" or pd.isna(task_row["Due Date"]):
+    default_due = datetime.date.today()
+else:
+    default_due = pd.to_datetime(task_row["Due Date"]).date()
+
+# Masukkan ke komponen Streamlit
+u_start = st.date_input("Update Start Date", value=default_start)
+with col_u2:
+    u_due = st.date_input("Update Due Date", value=default_due)
                     u_gdrive = st.text_input("Update Link GDrive", value=task_row["GDrive Link"])
                 
                 u_notes = st.text_area("Update Notes", value=task_row["Notes"])
