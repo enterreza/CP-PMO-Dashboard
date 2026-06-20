@@ -155,7 +155,7 @@ with tab_input:
         progress = st.slider("Initial Progress (%)", 0, 100, 0 if status != "Done" else 100)
         due_date = st.date_input("Due Date")
         
-        submit_btn = st.form_submit_with_button("Add Task")
+        submit_btn = st.form_submit_button("Add Task")
         
         if submit_btn:
             if task_name and assigned_to:
