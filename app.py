@@ -52,7 +52,8 @@ def load_data(contents):
     data_str = contents.decoded_content.decode('utf-8')
     data_json = json.loads(data_str)
     
-    columns = ["Task ID", "Task Name", "Assigned To", "Status", "Progress (%)", "Due Date", "Notes", "GDrive Link"]
+    # Kerangka kolom master (Menyertakan Start Date kembali)
+    columns = ["Task ID", "Task Name", "Assigned To", "Status", "Progress (%)", "Start Date", "Due Date", "Notes", "GDrive Link"]
     
     if not data_json:
         df = pd.DataFrame(columns=columns)
@@ -114,49 +115,36 @@ with tab_summary:
         
         st.markdown("---")
         
-        # --- LOGIK VISUALISASI TIMELINE GANTT CHART ---
-        st.markdown("### 📅 Project Timeline (Gantt Chart Basis Due Date)")
-        
-        # Menyalin data & memastikan tipe data Due Date adalah datetime
+        st.markdown("### 📅 Project Timeline (Gantt Chart)")
         df_gantt = df_tasks.copy()
-        df_gantt["Clean Due Date"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce')
         
-        # Mengisi data tanggal yang rusak/kosong dengan hari ini
-        df_gantt["Clean Due Date"] = df_gantt["Clean Due Date"].fillna(pd.Timestamp(datetime.date.today()))
+        # Validasi format penanggalan data untuk diagram timeline
+        df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce')
+        df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce')
         
-        # Karena tidak menggunakan Start Date, kita simulasikan visualisasi timeline 
-        # dari 'Hari Ini/Tanggal Sekarang' menuju ke 'Due Date' tugas masing-masing.
-        df_gantt["Start Plan"] = pd.Timestamp(datetime.date.today())
+        # Penanganan fallback jika ada sel tanggal kosong di data lama
+        df_gantt["Clean Start"] = df_gantt["Clean Start"].fillna(pd.Timestamp(datetime.date.today()))
+        df_gantt["Clean Due"] = df_gantt["Clean Due"].fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
         
-        # Jika Due Date ternyata hari kemarin/sudah lewat, sesuaikan start plan agar visualnya tetap keluar di chart
-        df_gantt["Start Plan"] = df_gantt.apply(
-            lambda r: r["Clean Due Date"] - pd.Timedelta(days=3) if r["Clean Due Date"] <= r["Start Plan"] else r["Start Plan"], 
-            axis=1
-        )
-        
-        # Membuat Gantt Chart menggunakan Plotly Timeline
+        # Plotly Gantt Chart menggunakan rentang tanggal asli
         fig_gantt = px.timeline(
             df_gantt,
-            x_start="Start Plan",
-            x_end="Clean Due Date",
+            x_start="Clean Start",
+            x_end="Clean Due",
             y="Task Name",
             color="Status",
             text="Assigned To",
-            hover_data=["Due Date", "Progress (%)", "Notes"],
+            hover_data=["Start Date", "Due Date", "Progress (%)"],
             color_discrete_map={'To Do': '#ff4b4b', 'In Progress': '#00a3e0', 'Done': '#00de6a'}
         )
-        
-        # Mengatur urutan agar task terbaru/paling atas muncul duluan
         fig_gantt.update_yaxes(categoryorder="category ascending")
         fig_gantt.update_layout(
-            xaxis_title="Timeline Periode Target",
+            xaxis_title="Gantt Timeline Rentang Waktu",
             yaxis_title="Daftar Tugas",
-            height=400,
+            height=380,
             margin=dict(t=10, b=20, l=10, r=10)
         )
-        
         st.plotly_chart(fig_gantt, use_container_width=True)
-        # ----------------------------------------------
 
         st.markdown("---")
         st.markdown("**Master Task Table**")
@@ -165,7 +153,7 @@ with tab_summary:
         st.info("ℹ️ Database kosong. Silakan masuk ke tab **Add New Task** untuk menambahkan tugas pertama Anda.")
 
 # ------------------------------------------
-# TAB 2: INPUT TASK BARU
+# TAB 2: INPUT TASK BARU (Dengan Notifikasi)
 # ------------------------------------------
 with tab_input:
     st.subheader("Input Data Project Baru")
@@ -174,12 +162,13 @@ with tab_input:
         with col_a:
             task_name = st.text_input("Nama Task")
             assigned = st.text_input("PIC (Assigned To)")
-            due_date = st.date_input("Due Date", value=datetime.date.today())
+            start_date = st.date_input("Start Date", value=datetime.date.today())
         with col_b:
             status = st.selectbox("Status", ["To Do", "In Progress", "Done"])
             progress = st.slider("Progress (%)", 0, 100, 0 if status != "Done" else 100)
-            gdrive_link = st.text_input("Link Google Drive (URL)")
+            due_date = st.date_input("Due Date", value=datetime.date.today() + datetime.timedelta(days=7))
             
+        gdrive_link = st.text_input("Link Google Drive (URL)")
         notes = st.text_area("Notes (Freetext Description)")
         submit_btn = st.form_submit_button("Tambah Task")
         
@@ -188,20 +177,25 @@ with tab_input:
                 new_id = f"TSK-{len(df_tasks) + 1:03d}"
                 new_task = {
                     "Task ID": new_id, "Task Name": task_name, "Assigned To": assigned,
-                    "Status": status, "Progress (%)": int(progress), "Due Date": str(due_date),
+                    "Status": status, "Progress (%)": int(progress), 
+                    "Start Date": str(start_date), "Due Date": str(due_date),
                     "Notes": notes, "GDrive Link": gdrive_link
                 }
                 updated_df = pd.concat([df_tasks, pd.DataFrame([new_task])], ignore_index=True)
+                
+                # Update memori & database
                 st.session_state["master_df"] = updated_df
                 save_data_to_github(repo, contents, updated_df, message=f"Add new task {new_id}")
-                st.success(f"🎉 Sukses! Task **{task_name}** ({new_id}) berhasil disimpan.")
+                
+                # Notifikasi Berhasil
+                st.success(f"🎉 Sukses! Task baru **{task_name}** ({new_id}) berhasil dibuat.")
                 st.balloons()
                 st.rerun()
             else:
                 st.error("❌ Kolom 'Nama Task' dan 'PIC' wajib diisi!")
 
 # ------------------------------------------
-# TAB 3: UPDATE TASK & PROGRESS
+# TAB 3: UPDATE TASK & PROGRESS (Dengan Notifikasi)
 # ------------------------------------------
 with tab_update:
     st.subheader("Modify Existing Task Status & Progress")
@@ -213,10 +207,9 @@ with tab_update:
             selected_id = selected_option.split(" - ")[0]
             task_row = df_tasks[df_tasks["Task ID"] == selected_id].iloc[0]
             
-            if task_row["Due Date"] == "" or pd.isna(task_row["Due Date"]):
-                default_due = datetime.date.today()
-            else:
-                default_due = pd.to_datetime(task_row["Due Date"]).date()
+            # Parsing tanggal aman
+            default_start = pd.to_datetime(task_row["Start Date"]).date() if task_row["Start Date"] != "" else datetime.date.today()
+            default_due = pd.to_datetime(task_row["Due Date"]).date() if task_row["Due Date"] != "" else datetime.date.today()
             
             with st.form("update_form"):
                 st.info(f"Mengedit Task: **{task_row['Task Name']}** | PIC: *{task_row['Assigned To']}*")
@@ -225,6 +218,7 @@ with tab_update:
                     current_status_idx = ["To Do", "In Progress", "Done"].index(task_row["Status"])
                     u_status = st.selectbox("Update Status", ["To Do", "In Progress", "Done"], index=current_status_idx)
                     u_progress = st.slider("Update Progress (%)", 0, 100, int(task_row["Progress (%)"]))
+                    u_start = st.date_input("Update Start Date", value=default_start)
                 with col_u2:
                     u_due = st.date_input("Update Due Date", value=default_due)
                     u_gdrive = st.text_input("Update Link GDrive", value=task_row["GDrive Link"])
@@ -239,19 +233,22 @@ with tab_update:
                     idx = df_tasks[df_tasks["Task ID"] == selected_id].index[0]
                     df_tasks.at[idx, "Status"] = u_status
                     df_tasks.at[idx, "Progress (%)"] = int(u_progress)
+                    df_tasks.at[idx, "Start Date"] = str(u_start)
                     df_tasks.at[idx, "Due Date"] = str(u_due)
                     df_tasks.at[idx, "Notes"] = u_notes
                     df_tasks.at[idx, "GDrive Link"] = u_gdrive
                     
                     st.session_state["master_df"] = df_tasks
                     save_data_to_github(repo, contents, df_tasks, message=f"Update task {selected_id}")
-                    st.success(f"💾 Perubahan pada **{selected_id}** berhasil disimpan!")
+                    
+                    # Notifikasi Berhasil
+                    st.success(f"💾 Perubahan data pada task **{selected_id}** sukses disimpan!")
                     st.rerun()
     else:
         st.info("ℹ️ Tidak ada data tugas yang tersedia untuk diperbarui.")
 
 # ------------------------------------------
-# TAB 4: DELETE TASK
+# TAB 4: DELETE TASK (Dengan Notifikasi)
 # ------------------------------------------
 with tab_delete:
     st.subheader("Hapus Task Terdaftar")
@@ -271,9 +268,12 @@ with tab_delete:
                 if delete_btn:
                     if confirm_check:
                         filtered_df = df_tasks[df_tasks["Task ID"] != del_id]
+                        
                         st.session_state["master_df"] = filtered_df
                         save_data_to_github(repo, contents, filtered_df, message=f"Delete task {del_id}")
-                        st.success(f"🗑️ Sukses! Task **{del_id}** telah berhasil dihapus.")
+                        
+                        # Notifikasi Berhasil
+                        st.success(f"🗑️ Sukses! Task **{del_id}** telah dihapus permanen dari server.")
                         st.rerun()
                     else:
                         st.error("❌ Gagal! Anda wajib mencentang kotak konfirmasi terlebih dahulu.")
