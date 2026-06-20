@@ -11,23 +11,19 @@ from github import GithubException
 # ==========================================
 st.set_page_config(page_title="CP-PMO Dashboard 2.0", layout="wide")
 
-# Path file di repositori GitHub
 FILE_PATH = "tasks.json"  
 
-# Mengambil kredensial dari Streamlit Secrets
 if "GITHUB_TOKEN" in st.secrets and "REPO_NAME" in st.secrets:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_NAME = st.secrets["REPO_NAME"]
 else:
     st.error("❌ Konfigurasi Secrets (GITHUB_TOKEN / REPO_NAME) belum diatur di Streamlit Cloud.")
-    st.info("Silakan ke Dashboard Streamlit Cloud -> Settings -> Secrets, lalu tambahkan token Anda.")
     st.stop()
 
 # ==========================================
 # 2. FUNGSI INTEGRASI GITHUB API
 # ==========================================
 def get_github_file():
-    """Mengambil file data tasks.json langsung dari repositori GitHub"""
     try:
         auth = Auth.Token(GITHUB_TOKEN)
         g = Github(auth=auth)
@@ -47,8 +43,6 @@ def get_github_file():
         return None, None
 
 def load_data(contents):
-    """Mengonversi isi file JSON dari GitHub menjadi Pandas DataFrame dengan proteksi Session State"""
-    # Jika data terbaru sudah ada di memori session state browser, utamakan data ini agar instan
     if "master_df" in st.session_state:
         return st.session_state["master_df"]
         
@@ -58,7 +52,6 @@ def load_data(contents):
     data_str = contents.decoded_content.decode('utf-8')
     data_json = json.loads(data_str)
     
-    # Kerangka kolom master (Tanpa Start Date)
     columns = ["Task ID", "Task Name", "Assigned To", "Status", "Progress (%)", "Due Date", "Notes", "GDrive Link"]
     
     if not data_json:
@@ -66,17 +59,14 @@ def load_data(contents):
     else:
         df = pd.DataFrame(data_json)
     
-    # Memastikan semua kolom master tersedia
     for col in columns:
         if col not in df.columns:
             df[col] = ""
             
-    # Daftarkan ke session state untuk pertama kali dimuat
     st.session_state["master_df"] = df[columns]
     return df[columns]
 
 def save_data_to_github(repo, contents, df, message="Update PMO data via Dashboard"):
-    """Menyimpan/Push kembali DataFrame terbaru ke file JSON di GitHub"""
     data_json = df.to_json(orient="records")
     repo.update_file(
         path=FILE_PATH,
@@ -97,7 +87,6 @@ st.write("Sistem manajemen tugas terintegrasi langsung dengan database repositor
 if not df_tasks.empty:
     df_tasks["Progress (%)"] = pd.to_numeric(df_tasks["Progress (%)"])
 
-# Membuat Tab Navigasi Antarmuka
 tab_summary, tab_input, tab_update, tab_delete = st.tabs([
     "📊 Summary & Analytics", 
     "➕ Add New Task", 
@@ -106,7 +95,7 @@ tab_summary, tab_input, tab_update, tab_delete = st.tabs([
 ])
 
 # ------------------------------------------
-# TAB 1: DASHBOARD SUMMARY
+# TAB 1: DASHBOARD SUMMARY & GANTT TIMELINE
 # ------------------------------------------
 with tab_summary:
     st.subheader("Project Key Performance Indicators")
@@ -125,19 +114,49 @@ with tab_summary:
         
         st.markdown("---")
         
-        st.markdown("**Progress per Task**")
-        fig_prog = px.bar(
-            df_tasks, 
-            x='Task Name', 
-            y='Progress (%)', 
-            color='Status',
-            text='Progress (%)',
-            hover_data=["Due Date", "Assigned To"],
+        # --- LOGIK VISUALISASI TIMELINE GANTT CHART ---
+        st.markdown("### 📅 Project Timeline (Gantt Chart Basis Due Date)")
+        
+        # Menyalin data & memastikan tipe data Due Date adalah datetime
+        df_gantt = df_tasks.copy()
+        df_gantt["Clean Due Date"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce')
+        
+        # Mengisi data tanggal yang rusak/kosong dengan hari ini
+        df_gantt["Clean Due Date"] = df_gantt["Clean Due Date"].fillna(pd.Timestamp(datetime.date.today()))
+        
+        # Karena tidak menggunakan Start Date, kita simulasikan visualisasi timeline 
+        # dari 'Hari Ini/Tanggal Sekarang' menuju ke 'Due Date' tugas masing-masing.
+        df_gantt["Start Plan"] = pd.Timestamp(datetime.date.today())
+        
+        # Jika Due Date ternyata hari kemarin/sudah lewat, sesuaikan start plan agar visualnya tetap keluar di chart
+        df_gantt["Start Plan"] = df_gantt.apply(
+            lambda r: r["Clean Due Date"] - pd.Timedelta(days=3) if r["Clean Due Date"] <= r["Start Plan"] else r["Start Plan"], 
+            axis=1
+        )
+        
+        # Membuat Gantt Chart menggunakan Plotly Timeline
+        fig_gantt = px.timeline(
+            df_gantt,
+            x_start="Start Plan",
+            x_end="Clean Due Date",
+            y="Task Name",
+            color="Status",
+            text="Assigned To",
+            hover_data=["Due Date", "Progress (%)", "Notes"],
             color_discrete_map={'To Do': '#ff4b4b', 'In Progress': '#00a3e0', 'Done': '#00de6a'}
         )
-        fig_prog.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=350)
-        fig_prog.update_traces(textposition='outside')
-        st.plotly_chart(fig_prog, use_container_width=True)
+        
+        # Mengatur urutan agar task terbaru/paling atas muncul duluan
+        fig_gantt.update_yaxes(categoryorder="category ascending")
+        fig_gantt.update_layout(
+            xaxis_title="Timeline Periode Target",
+            yaxis_title="Daftar Tugas",
+            height=400,
+            margin=dict(t=10, b=20, l=10, r=10)
+        )
+        
+        st.plotly_chart(fig_gantt, use_container_width=True)
+        # ----------------------------------------------
 
         st.markdown("---")
         st.markdown("**Master Task Table**")
@@ -146,7 +165,7 @@ with tab_summary:
         st.info("ℹ️ Database kosong. Silakan masuk ke tab **Add New Task** untuk menambahkan tugas pertama Anda.")
 
 # ------------------------------------------
-# TAB 2: INPUT TASK BARU (Instan via Session State)
+# TAB 2: INPUT TASK BARU
 # ------------------------------------------
 with tab_input:
     st.subheader("Input Data Project Baru")
@@ -162,34 +181,19 @@ with tab_input:
             gdrive_link = st.text_input("Link Google Drive (URL)")
             
         notes = st.text_area("Notes (Freetext Description)")
-        
         submit_btn = st.form_submit_button("Tambah Task")
         
         if submit_btn:
             if task_name and assigned:
-                # Membuat format Task ID otomatis berbasis data state saat ini
                 new_id = f"TSK-{len(df_tasks) + 1:03d}"
-                
                 new_task = {
-                    "Task ID": new_id,
-                    "Task Name": task_name,
-                    "Assigned To": assigned,
-                    "Status": status,
-                    "Progress (%)": int(progress),
-                    "Due Date": str(due_date),
-                    "Notes": notes,
-                    "GDrive Link": gdrive_link
+                    "Task ID": new_id, "Task Name": task_name, "Assigned To": assigned,
+                    "Status": status, "Progress (%)": int(progress), "Due Date": str(due_date),
+                    "Notes": notes, "GDrive Link": gdrive_link
                 }
-                
-                # 1. Gabungkan data baru ke DataFrame
                 updated_df = pd.concat([df_tasks, pd.DataFrame([new_task])], ignore_index=True)
-                
-                # 2. Paksa simpan langsung ke Session State agar langsung muncul di Tab Summary
                 st.session_state["master_df"] = updated_df
-                
-                # 3. Jalankan Push ke GitHub di latar belakang
                 save_data_to_github(repo, contents, updated_df, message=f"Add new task {new_id}")
-                
                 st.success(f"🎉 Sukses! Task **{task_name}** ({new_id}) berhasil disimpan.")
                 st.balloons()
                 st.rerun()
@@ -201,7 +205,6 @@ with tab_input:
 # ------------------------------------------
 with tab_update:
     st.subheader("Modify Existing Task Status & Progress")
-    
     if not df_tasks.empty:
         task_options = [f"{row['Task ID']} - {row['Task Name']}" for _, row in df_tasks.iterrows()]
         selected_option = st.selectbox("Pilih Task untuk di-update", task_options)
@@ -217,7 +220,6 @@ with tab_update:
             
             with st.form("update_form"):
                 st.info(f"Mengedit Task: **{task_row['Task Name']}** | PIC: *{task_row['Assigned To']}*")
-                
                 col_u1, col_u2 = st.columns(2)
                 with col_u1:
                     current_status_idx = ["To Do", "In Progress", "Done"].index(task_row["Status"])
@@ -229,13 +231,10 @@ with tab_update:
                 
                 u_notes = st.text_area("Update Notes (Freetext)", value=task_row["Notes"])
                 
-                if u_progress == 100:
-                    u_status = "Done"
-                elif u_progress > 0 and u_status == "To Do":
-                    u_status = "In Progress"
+                if u_progress == 100: u_status = "Done"
+                elif u_progress > 0 and u_status == "To Do": u_status = "In Progress"
                 
                 update_btn = st.form_submit_button("Simpan Perubahan")
-                
                 if update_btn:
                     idx = df_tasks[df_tasks["Task ID"] == selected_id].index[0]
                     df_tasks.at[idx, "Status"] = u_status
@@ -244,9 +243,7 @@ with tab_update:
                     df_tasks.at[idx, "Notes"] = u_notes
                     df_tasks.at[idx, "GDrive Link"] = u_gdrive
                     
-                    # Update internal state secara langsung
                     st.session_state["master_df"] = df_tasks
-                    
                     save_data_to_github(repo, contents, df_tasks, message=f"Update task {selected_id}")
                     st.success(f"💾 Perubahan pada **{selected_id}** berhasil disimpan!")
                     st.rerun()
@@ -258,7 +255,6 @@ with tab_update:
 # ------------------------------------------
 with tab_delete:
     st.subheader("Hapus Task Terdaftar")
-    
     if not df_tasks.empty:
         del_task_options = [f"{row['Task ID']} - {row['Task Name']}" for _, row in df_tasks.iterrows()]
         selected_del_option = st.selectbox("Pilih Task yang ingin dihapus secara Permanen", del_task_options, key="del_select")
@@ -266,26 +262,18 @@ with tab_delete:
         if selected_del_option:
             del_id = selected_del_option.split(" - ")[0]
             del_row = df_tasks[df_tasks["Task ID"] == del_id].iloc[0]
-            
             st.warning(f"⚠️ **PERHATIAN:** Anda akan menghapus task berikut secara permanen:")
             st.code(f"ID: {del_row['Task ID']}\nNama Task: {del_row['Task Name']}\nPIC: {del_row['Assigned To']}")
             
             with st.form("delete_form"):
                 confirm_check = st.checkbox("Saya yakin ingin menghapus task ini secara permanen")
                 delete_btn = st.form_submit_button("🔴 Hapus Task Sekarang")
-                
                 if delete_btn:
                     if confirm_check:
-                        # Buat DataFrame baru tanpa task yang dihapus
                         filtered_df = df_tasks[df_tasks["Task ID"] != del_id]
-                        
-                        # Update session state seketika
                         st.session_state["master_df"] = filtered_df
-                        
                         save_data_to_github(repo, contents, filtered_df, message=f"Delete task {del_id}")
                         st.success(f"🗑️ Sukses! Task **{del_id}** telah berhasil dihapus.")
                         st.rerun()
                     else:
-                        st.error("❌ Gagal! Anda wajib mencentang kotak konfirmasi di atas terlebih dahulu.")
-    else:
-        st.info("ℹ️ Tidak ada data tugas yang tersedia untuk bisa dihapus.")
+                        st.error("❌ Gagal! Anda wajib mencentang kotak konfirmasi terlebih dahulu.")
