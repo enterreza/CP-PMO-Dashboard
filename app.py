@@ -12,10 +12,13 @@ st.set_page_config(page_title="Project Management Dashboard", layout="wide")
 
 # Konfigurasi GitHub (Disarankan menggunakan streamlit secrets pada produksi)
 # Untuk lokal, Anda bisa mengisinya langsung atau via sidebar
-GITHUB_TOKEN = st.sidebar.text_input("GitHub Token", type="password")
-REPO_NAME = st.sidebar.text_input("Repository Name (e.g., username/repo-id)")
-FILE_PATH = "tasks.json"  # File penyimpan data di repo
-
+if "GITHUB_TOKEN" in st.secrets and "REPO_NAME" in st.secrets:
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    REPO_NAME = st.secrets["REPO_NAME"]
+else:
+    st.error("Konfigurasi Secrets (GITHUB_TOKEN / REPO_NAME) belum diatur di Streamlit Cloud.")
+    st.stop()
+    
 def get_github_file():
     """Mengambil file data dari GitHub"""
     if not GITHUB_TOKEN or not REPO_NAME:
