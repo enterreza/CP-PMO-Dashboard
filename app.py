@@ -6,14 +6,13 @@ import plotly.express as px
 from github import Github, Auth
 from github import GithubException
 from streamlit_oauth import OAuth2Component
-import os
+import base64
 
 # ==========================================
 # 1. KONFIGURASI AWAL & TAMPILAN (SMARTSHEET STYLE)
 # ==========================================
-st.set_page_config(page_title="CP-PMO Smartsheet Workspace", layout="wide")
+st.set_page_config(page_title="CP-PMO Multi-Project Workspace", layout="wide")
 
-# Gaya Tampilan Smartsheet
 st.markdown("""
     <style>
         html, body, [data-testid="stMarkdownContainer"] {
@@ -66,7 +65,6 @@ st.markdown("""
 # ------------------------------------------
 # KONFIGURASI SECRETS (GITHUB & GOOGLE OAUTH)
 # ------------------------------------------
-# Pastikan semua secret ini sudah diisi di Streamlit Cloud Secrets Anda
 if all(k in st.secrets for k in ["GITHUB_TOKEN", "REPO_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]):
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_NAME = st.secrets["REPO_NAME"]
@@ -74,17 +72,13 @@ if all(k in st.secrets for k in ["GITHUB_TOKEN", "REPO_NAME", "GOOGLE_CLIENT_ID"
     CLIENT_SECRET = st.secrets["GOOGLE_CLIENT_SECRET"]
 else:
     st.error("❌ Konfigurasi Secrets Belum Lengkap!")
-    st.info("Harap tambahkan GITHUB_TOKEN, REPO_NAME, GOOGLE_CLIENT_ID, dan GOOGLE_CLIENT_SECRET di Dashboard Secrets Streamlit Anda.")
     st.stop()
 
 FILE_PATH = "tasks.json"
-
-# Konfigurasi Endpoint OAuth Google resmi
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
-# Inisialisasi komponen OAuth
 oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZATION_URL, TOKEN_URL, TOKEN_URL, REVOKE_URL)
 
 # ==========================================
@@ -92,10 +86,8 @@ oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZATION_URL, TOKEN_URL,
 # ==========================================
 if "auth" not in st.session_state:
     st.title("🔒 CP-PMO Smartsheet Secure Login")
-    st.write("Silakan masuk menggunakan akun Google/Gmail institusi Anda untuk mengakses workspace.")
+    st.write("Silakan masuk menggunakan akun Google/Gmail untuk mengakses workspace.")
     
-    # Membuat tombol "Login dengan Google" otomatis
-    # Sesuaikan redirect_uri dengan URL aplikasi Streamlit Cloud Anda nantinya
     redirect_uri = st.secrets.get("REDIRECT_URI", "http://localhost:8501") 
     result = oauth2.authorize_button(
         name="Continue with Google",
@@ -106,9 +98,6 @@ if "auth" not in st.session_state:
     
     if result and "token" in result:
         st.session_state["auth"] = result["token"]
-        # Mengambil informasi profil dari token id
-        import base64
-        # Decode JWT token untuk mengambil email user
         id_token = result["token"]["id_token"]
         payload = id_token.split(".")[1]
         payload += "=" * ((4 - len(payload) % 4) % 4)
@@ -119,31 +108,26 @@ if "auth" not in st.session_state:
     else:
         st.stop()
 
-# Jika sudah berhasil login, ambil data user
 user_email = st.session_state["user_email"]
 user_name = st.session_state["user_name"]
 
 # ==========================================
-# 3. PENGATURAN HAK AKSES (ROLE-BASED ACCESS CONTROL)
+# 3. PENGATURAN HAK AKSES & ADMIN (LOWERCASE CHECK)
 # ==========================================
-# DAFTAR EMAIL ADMIN (Bisa Add, Update, Delete)
-ADMIN_EMAILS = [
-    "enter.reza@gmail.com", 
-    "manager_pmo@yourcompany.com"
-]
+ADMIN_EMAILS = [email.lower() for email in [
+    "enter.reza@gmail.com", # Email Anda sudah aman terdaftar sebagai admin utama
+    "admin_pmo@gmail.com"
+]]
 
-# Cek apakah user saat ini adalah admin atau sekadar viewer (Read-Only)
-is_admin = user_email in ADMIN_EMAILS
+is_admin = user_email.lower() in ADMIN_EMAILS
 
-# Tampilkan info login di sidebar/atas halaman
 st.markdown(f"""
     <div class="user-profile">
-        👤 Login sebagai: <b>{user_name}</b> ({user_email}) | 
-        🔑 Hak Akses: <b>{'🟢 ADMIN (Full Access)' if is_admin else '🔵 TEAM MEMBER (Read-Only)'}</b>
+        👤 Login: <b>{user_name}</b> ({user_email}) | 
+        🔑 Akses: <b>{'🟢 ADMIN (Full Access)' if is_admin else '🔵 TEAM MEMBER (Read-Only)'}</b>
     </div>
 """, unsafe_allow_html=True)
 
-# Tombol Logout jika diperlukan
 if st.sidebar.button("🚪 Logout Account"):
     del st.session_state["auth"]
     if "master_df" in st.session_state:
@@ -163,7 +147,7 @@ def get_github_file():
             return repo, contents
         except GithubException as e:
             if e.status == 404:
-                repo.create_file(FILE_PATH, "Initial commit for project management", "[]")
+                repo.create_file(FILE_PATH, "Initial commit", "[]")
                 contents = repo.get_contents(FILE_PATH)
                 return repo, contents
             else:
@@ -182,82 +166,107 @@ def load_data(contents):
     data_str = contents.decoded_content.decode('utf-8')
     data_json = json.loads(data_str)
     
-    columns = ["Task ID", "Task Name", "Assigned To", "Status", "Progress (%)", "Start Date", "Due Date", "Notes", "GDrive Link"]
+    # KUNCI UTAMA: Menambahkan kolom "Project Name" ke dalam master columns
+    columns = ["Task ID", "Project Name", "Task Name", "Assigned To", "Status", "Progress (%)", "Start Date", "Due Date", "Notes", "GDrive Link"]
     
     if not data_json:
         df = pd.DataFrame(columns=columns)
     else:
         df = pd.DataFrame(data_json)
     
+    # Migrasi data lama (jika kolom Project Name belum ada, isi default "Project Utama")
     for col in columns:
         if col not in df.columns:
-            df[col] = ""
+            if col == "Project Name":
+                df[col] = "Project Utama"
+            else:
+                df[col] = ""
             
     st.session_state["master_df"] = df[columns]
     return df[columns]
 
 def save_data_to_github(repo, contents, df, message="Update PMO data via Dashboard"):
     data_json = df.to_json(orient="records")
-    repo.update_file(
-        path=FILE_PATH,
-        message=message,
-        content=data_json,
-        sha=contents.sha
-    )
+    repo.update_file(path=FILE_PATH, message=message, content=data_json, sha=contents.sha)
 
-# Load data utama
 repo, contents = get_github_file()
 df_tasks = load_data(contents)
 
 if not df_tasks.empty:
     df_tasks["Progress (%)"] = pd.to_numeric(df_tasks["Progress (%)"])
 
-# Pembatasan tab berdasarkan Role Akses
+# ==========================================
+# 5. ANTARMUKA WORKSPACE MULTI-PROJECT
+# ==========================================
 if is_admin:
-    tabs_list = ["📊 Grid & Gantt View", "➕ Row Baru / Task", "🔄 Edit Row Item", "❌ Delete Row Item"]
+    tabs_list = ["📊 Portfolio & Gantt View", "➕ Tambah Proyek / Task Baru", "🔄 Edit Baris Data", "❌ Hapus Baris Data"]
 else:
-    tabs_list = ["📊 Grid & Gantt View (Read Only)"]
+    tabs_list = ["📊 Portfolio & Gantt View (Read Only)"]
 
 active_tabs = st.tabs(tabs_list)
 
 # ------------------------------------------
-# TAB 1: DASHBOARD SUMMARY (Dapat diakses oleh ALL USER)
+# TAB 1: PORTFOLIO & FILTER GANTT VIEW
 # ------------------------------------------
 with active_tabs[0]:
-    st.subheader("📋 CP-PMO Smartsheet Workspace")
+    st.subheader("📋 CP-PMO Multi-Project Sheet Workspace")
+    
     if not df_tasks.empty:
-        total_tasks = len(df_tasks)
-        avg_progress = df_tasks["Progress (%)"].mean()
-        completed_tasks = len(df_tasks[df_tasks["Status"] == "Done"])
-        in_progress_tasks = len(df_tasks[df_tasks["Status"] == "In Progress"])
+        # Menghasilkan list projek unik untuk dijadikan filter dropdown
+        available_projects = sorted(df_tasks["Project Name"].unique().tolist())
+        
+        col_filter1, col_filter2 = st.columns([1, 3])
+        with col_filter1:
+            # Dropdown Filter Multi-Project
+            project_filter = st.selectbox("📂 Pilih Tampilan Proyek:", ["✨ Tampilkan Semua Proyek"] + available_projects)
+        
+        # Filter dataframe berdasarkan pilihan dropdown
+        if project_filter == "✨ Tampilkan Semua Proyek":
+            df_filtered = df_tasks
+        else:
+            df_filtered = df_tasks[df_tasks["Project Name"] == project_filter]
+            
+        # Kalkulasi Metrik Berdasarkan Data yang sudah difilter
+        total_tasks = len(df_filtered)
+        avg_progress = df_filtered["Progress (%)"].mean() if total_tasks > 0 else 0
+        completed_tasks = len(df_filtered[df_filtered["Status"] == "Done"])
+        in_progress_tasks = len(df_filtered[df_filtered["Status"] == "In Progress"])
         
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Sheets Row", total_tasks)
-        col2.metric("Sheet Avg Progress", f"{avg_progress:.1f}%")
+        col1.metric("Total Rows Filtered", total_tasks)
+        col2.metric("Project Avg Progress", f"{avg_progress:.1f}%")
         col3.metric("Completed Status", completed_tasks)
         col4.metric("Active Allocation", in_progress_tasks)
         
         st.markdown("---")
-        st.markdown("### 📅 Smartsheet Timeline Split-Gantt")
+        st.markdown("### 📅 Smartsheet Timeline Multi-Gantt")
         
-        df_gantt = df_tasks.copy()
-        df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce')
-        df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce')
-        df_gantt["Clean Start"] = df_gantt["Clean Start"].fillna(pd.Timestamp(datetime.date.today()))
-        df_gantt["Clean Due"] = df_gantt["Clean Due"].fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
-        
-        fig_gantt = px.timeline(
-            df_gantt, x_start="Clean Start", x_end="Clean Due", y="Task Name",
-            color="Status", text="Assigned To", hover_data=["Start Date", "Due Date", "Progress (%)"],
-            color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Done': '#A3E4D7'}
-        )
-        fig_gantt.update_layout(plot_bgcolor="white", paper_bgcolor="white", height=340, margin=dict(t=10, b=10, l=10, r=10))
-        st.plotly_chart(fig_gantt, use_container_width=True)
+        if total_tasks > 0:
+            df_gantt = df_filtered.copy()
+            df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce').fillna(pd.Timestamp(datetime.date.today()))
+            df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce').fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
+            
+            # Jika menampilkan semua projek, ubah nama display sumbu Y agar mengandung nama projeknya
+            if project_filter == "✨ Tampilkan Semua Proyek":
+                df_gantt["Gantt_Label"] = df_gantt["Project Name"] + " - " + df_gantt["Task Name"]
+            else:
+                df_gantt["Gantt_Label"] = df_gantt["Task Name"]
+                
+            fig_gantt = px.timeline(
+                df_gantt, x_start="Clean Start", x_end="Clean Due", y="Gantt_Label",
+                color="Status", text="Assigned To", hover_data=["Project Name", "Start Date", "Due Date", "Progress (%)"],
+                color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Done': '#A3E4D7'}
+            )
+            fig_gantt.update_layout(plot_bgcolor="white", paper_bgcolor="white", height=380, margin=dict(t=10, b=10, l=10, r=10), yaxis_title="")
+            fig_gantt.update_yaxes(categoryorder="category ascending")
+            st.plotly_chart(fig_gantt, use_container_width=True)
+        else:
+            st.info("Tidak ada task di dalam proyek ini.")
 
         st.markdown("---")
         st.markdown("### 📄 Sheet Interactive Row Grid")
         st.dataframe(
-            df_tasks, use_container_width=True, hide_index=True,
+            df_filtered, use_container_width=True, hide_index=True,
             column_config={
                 "GDrive Link": st.column_config.LinkColumn("Attachment"),
                 "Progress (%)": st.column_config.ProgressColumn("Overall Progress", format="%d%%")
@@ -267,48 +276,61 @@ with active_tabs[0]:
         st.info("ℹ️ Lembar kerja Anda kosong.")
 
 # ------------------------------------------
-# PROTEKSI AMAN: BLOK AKSES JIKA BUKAN ADMIN
+# FITUR ADMIN: INPUT / UPDATE / DELETE
 # ------------------------------------------
 if is_admin:
-    # TAB 2: INPUT ROW (Hanya Admin)
+    # TAB 2: INPUT ROW BARU (MENDUKUNG PILIHAN PROYEK ATAU BUAT PROYEK BARU)
     with active_tabs[1]:
-        st.subheader("Add New Row Item to Sheet")
+        st.subheader("Add New Project or Task Item")
+        
+        # Mengumpulkan list projek yang sudah ada untuk mempermudah autocomplete input
+        existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Smart QR Studio"]
+        
         with st.form("input_form", clear_on_submit=True):
             col_a, col_b = st.columns(2)
             with col_a:
-                task_name = st.text_input("Task Name / Activity")
+                # User bisa memilih projek yang sudah ada, atau menuliskan nama projek baru
+                project_name_select = st.selectbox("📂 Pilih Projek Eksis (Atau tulis baru di kolom bawah):", ["-- Tulis Projek Baru --"] + existing_projects)
+                project_name_custom = st.text_input("📝 Tulis Nama Projek Baru (Jika memilih opsi tulis baru di atas):")
+                
+                task_name = st.text_input("Task Name / Activity Description")
                 assigned = st.text_input("Assigned To (PIC Name)")
-                start_date = st.date_input("Start Date", value=datetime.date.today())
             with col_b:
                 status = st.selectbox("Allocation Status", ["To Do", "In Progress", "Done"])
                 progress = st.slider("Progress (%)", 0, 100, 0 if status != "Done" else 100)
+                start_date = st.date_input("Start Date", value=datetime.date.today())
                 due_date = st.date_input("Due Date Target", value=datetime.date.today() + datetime.timedelta(days=7))
                 
-            gdrive_link = st.text_input("Google Drive Link")
-            notes = st.text_area("Row Activity Comments & Notes")
-            submit_btn = st.form_submit_button("Insert Row")
+            gdrive_link = st.text_input("Google Drive Link Documentation")
+            notes = st.text_area("Row Comments & Notes")
+            submit_btn = st.form_submit_button("Insert Row to Workspace")
             
             if submit_btn:
-                if task_name and assigned:
+                # Menentukan nama projek final
+                final_project_name = project_name_custom if project_name_select == "-- Tulis Projek Baru --" else project_name_select
+                
+                if final_project_name.strip() != "" and task_name and assigned:
                     new_id = f"TSK-{len(df_tasks) + 1:03d}"
                     new_task = {
-                        "Task ID": new_id, "Task Name": task_name, "Assigned To": assigned,
-                        "Status": status, "Progress (%)": int(progress), 
-                        "Start Date": str(start_date), "Due Date": str(due_date),
-                        "Notes": notes, "GDrive Link": gdrive_link
+                        "Task ID": new_id, "Project Name": final_project_name.strip(), "Task Name": task_name, 
+                        "Assigned To": assigned, "Status": status, "Progress (%)": int(progress), 
+                        "Start Date": str(start_date), "Due Date": str(due_date), "Notes": notes, "GDrive Link": gdrive_link
                     }
                     updated_df = pd.concat([df_tasks, pd.DataFrame([new_task])], ignore_index=True)
                     st.session_state["master_df"] = updated_df
-                    save_data_to_github(repo, contents, updated_df, message=f"Insert row {new_id} by {user_email}")
-                    st.success(f"✔️ Row **{new_id}** sukses ditambahkan oleh {user_name}!")
+                    save_data_to_github(repo, contents, updated_df, message=f"Insert row {new_id} for {final_project_name}")
+                    st.success(f"✔️ Berhasil menambahkan Task baru di bawah Proyek **{final_project_name}**!")
                     st.rerun()
+                else:
+                    st.error("❌ Nama Projek, Nama Task, dan PIC wajib diisi!")
 
-    # TAB 3: EDIT ROW ITEMS (Hanya Admin)
+    # TAB 3: EDIT BARIS DATA (MULTI-PROJECT SUPPORT)
     with active_tabs[2]:
         st.subheader("Update Sheet Row Values")
         if not df_tasks.empty:
-            task_options = [f"{row['Task ID']} - {row['Task Name']}" for _, row in df_tasks.iterrows()]
-            selected_option = st.selectbox("Pilih nomor indeks baris", task_options)
+            # Format opsi dropdown agar menampilkan info Projek beserta Nama Task-nya
+            task_options = [f"{row['Task ID']} - [{row['Project Name']}] {row['Task Name']}" for _, row in df_tasks.iterrows()]
+            selected_option = st.selectbox("Pilih nomor indeks baris tugas:", task_options)
             
             if selected_option:
                 selected_id = selected_option.split(" - ")[0]
@@ -318,16 +340,20 @@ if is_admin:
                 default_due = pd.to_datetime(task_row["Due Date"]).date() if task_row["Due Date"] != "" else datetime.date.today()
                 
                 with st.form("update_form"):
+                    st.info(f"Mengedit ID: {task_row['Task ID']} | Proyek: **{task_row['Project Name']}**")
                     col_u1, col_u2 = st.columns(2)
                     with col_u1:
+                        # Mengizinkan pemindahan projek jika dibutuhkan
+                        u_project = st.text_input("Ubah/Edit Nama Proyek", value=task_row["Project Name"])
+                        u_task_name = st.text_input("Ubah Nama Task", value=task_row["Task Name"])
                         current_status_idx = ["To Do", "In Progress", "Done"].index(task_row["Status"])
                         u_status = st.selectbox("Update Status", ["To Do", "In Progress", "Done"], index=current_status_idx)
+                    with col_u2:
                         u_progress = st.slider("Update Progress (%)", 0, 100, int(task_row["Progress (%)"]))
                         u_start = st.date_input("Change Start Date", value=default_start)
-                    with col_u2:
                         u_due = st.date_input("Change Due Date", value=default_due)
-                        u_gdrive = st.text_input("Change GDrive URL Link", value=task_row["GDrive Link"])
                     
+                    u_gdrive = st.text_input("Change GDrive URL Link", value=task_row["GDrive Link"])
                     u_notes = st.text_area("Change Comments/Notes", value=task_row["Notes"])
                     
                     if u_progress == 100: u_status = "Done"
@@ -336,6 +362,8 @@ if is_admin:
                     update_btn = st.form_submit_button("Commit Changes")
                     if update_btn:
                         idx = df_tasks[df_tasks["Task ID"] == selected_id].index[0]
+                        df_tasks.at[idx, "Project Name"] = u_project
+                        df_tasks.at[idx, "Task Name"] = u_task_name
                         df_tasks.at[idx, "Status"] = u_status
                         df_tasks.at[idx, "Progress (%)"] = int(u_progress)
                         df_tasks.at[idx, "Start Date"] = str(u_start)
@@ -344,27 +372,28 @@ if is_admin:
                         df_tasks.at[idx, "GDrive Link"] = u_gdrive
                         
                         st.session_state["master_df"] = df_tasks
-                        save_data_to_github(repo, contents, df_tasks, message=f"Update row {selected_id} by {user_email}")
+                        save_data_to_github(repo, contents, df_tasks, message=f"Update row {selected_id}")
                         st.success(f"💾 Perubahan baris data **{selected_id}** sukses disimpan!")
                         st.rerun()
 
-    # TAB 4: DELETE SHEET ROWS (Hanya Admin)
+    # TAB 4: HAPUS BARIS DATA
     with active_tabs[3]:
-        st.subheader("Remove Selected Row From Worksheet")
+        st.subheader("Remove Selected Row From Workspace")
         if not df_tasks.empty:
-            del_task_options = [f"{row['Task ID']} - {row['Task Name']}" for _, row in df_tasks.iterrows()]
-            selected_del_option = st.selectbox("Pilih Baris yang ingin dihapus", del_task_options)
+            del_task_options = [f"{row['Task ID']} - [{row['Project Name']}] {row['Task Name']}" for _, row in df_tasks.iterrows()]
+            selected_del_option = st.selectbox("Pilih Baris yang ingin dihapus", del_task_options, key="del_select")
             
             if selected_del_option:
                 del_id = selected_del_option.split(" - ")[0]
                 del_row = df_tasks[df_tasks["Task ID"] == del_id].iloc[0]
                 
                 with st.form("delete_form"):
+                    st.warning(f"Apakah Anda yakin ingin menghapus Task dari Proyek: {del_row['Project Name']}?")
                     confirm_check = st.checkbox("Saya mengonfirmasi untuk melakukan penghapusan data ini")
                     delete_btn = st.form_submit_button("🔴 Delete Selected Row")
                     if delete_btn and confirm_check:
                         filtered_df = df_tasks[df_tasks["Task ID"] != del_id]
                         st.session_state["master_df"] = filtered_df
-                        save_data_to_github(repo, contents, filtered_df, message=f"Delete row {del_id} by {user_email}")
+                        save_data_to_github(repo, contents, filtered_df, message=f"Delete row {del_id}")
                         st.success(f"🗑️ Baris data **{del_id}** sukses dihapus!")
                         st.rerun()
