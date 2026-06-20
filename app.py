@@ -47,7 +47,11 @@ def get_github_file():
         return None, None
 
 def load_data(contents):
-    """Mengonversi isi file JSON dari GitHub menjadi Pandas DataFrame"""
+    """Mengonversi isi file JSON dari GitHub menjadi Pandas DataFrame dengan proteksi Session State"""
+    # Jika data terbaru sudah ada di memori session state browser, utamakan data ini agar instan
+    if "master_df" in st.session_state:
+        return st.session_state["master_df"]
+        
     if contents is None:
         return pd.DataFrame()
     
@@ -58,15 +62,17 @@ def load_data(contents):
     columns = ["Task ID", "Task Name", "Assigned To", "Status", "Progress (%)", "Due Date", "Notes", "GDrive Link"]
     
     if not data_json:
-        return pd.DataFrame(columns=columns)
-        
-    df = pd.DataFrame(data_json)
+        df = pd.DataFrame(columns=columns)
+    else:
+        df = pd.DataFrame(data_json)
     
-    # Memastikan kolom tetap ada meskipun baris data lama belum memilikinya
+    # Memastikan semua kolom master tersedia
     for col in columns:
         if col not in df.columns:
             df[col] = ""
             
+    # Daftarkan ke session state untuk pertama kali dimuat
+    st.session_state["master_df"] = df[columns]
     return df[columns]
 
 def save_data_to_github(repo, contents, df, message="Update PMO data via Dashboard"):
@@ -91,7 +97,7 @@ st.write("Sistem manajemen tugas terintegrasi langsung dengan database repositor
 if not df_tasks.empty:
     df_tasks["Progress (%)"] = pd.to_numeric(df_tasks["Progress (%)"])
 
-# Membuat Tab Navigasi Antarmuka (Menambahkan Tab Hapus)
+# Membuat Tab Navigasi Antarmuka
 tab_summary, tab_input, tab_update, tab_delete = st.tabs([
     "📊 Summary & Analytics", 
     "➕ Add New Task", 
@@ -140,7 +146,7 @@ with tab_summary:
         st.info("ℹ️ Database kosong. Silakan masuk ke tab **Add New Task** untuk menambahkan tugas pertama Anda.")
 
 # ------------------------------------------
-# TAB 2: INPUT TASK BARU (Dengan Notifikasi Sukses)
+# TAB 2: INPUT TASK BARU (Instan via Session State)
 # ------------------------------------------
 with tab_input:
     st.subheader("Input Data Project Baru")
@@ -161,6 +167,7 @@ with tab_input:
         
         if submit_btn:
             if task_name and assigned:
+                # Membuat format Task ID otomatis berbasis data state saat ini
                 new_id = f"TSK-{len(df_tasks) + 1:03d}"
                 
                 new_task = {
@@ -174,16 +181,17 @@ with tab_input:
                     "GDrive Link": gdrive_link
                 }
                 
+                # 1. Gabungkan data baru ke DataFrame
                 updated_df = pd.concat([df_tasks, pd.DataFrame([new_task])], ignore_index=True)
                 
-                # Simpan ke GitHub
+                # 2. Paksa simpan langsung ke Session State agar langsung muncul di Tab Summary
+                st.session_state["master_df"] = updated_df
+                
+                # 3. Jalankan Push ke GitHub di latar belakang
                 save_data_to_github(repo, contents, updated_df, message=f"Add new task {new_id}")
                 
-                # Memunculkan Notifikasi Flash Sukses & Animasi Balon
-                st.success(f"🎉 Sukses! Task **{task_name}** ({new_id}) berhasil disimpan ke GitHub.")
+                st.success(f"🎉 Sukses! Task **{task_name}** ({new_id}) berhasil disimpan.")
                 st.balloons()
-                
-                # Memberi sedikit delay agar user bisa melihat notifikasi sebelum reload halaman
                 st.rerun()
             else:
                 st.error("❌ Kolom 'Nama Task' dan 'PIC' wajib diisi!")
@@ -236,6 +244,9 @@ with tab_update:
                     df_tasks.at[idx, "Notes"] = u_notes
                     df_tasks.at[idx, "GDrive Link"] = u_gdrive
                     
+                    # Update internal state secara langsung
+                    st.session_state["master_df"] = df_tasks
+                    
                     save_data_to_github(repo, contents, df_tasks, message=f"Update task {selected_id}")
                     st.success(f"💾 Perubahan pada **{selected_id}** berhasil disimpan!")
                     st.rerun()
@@ -243,7 +254,7 @@ with tab_update:
         st.info("ℹ️ Tidak ada data tugas yang tersedia untuk diperbarui.")
 
 # ------------------------------------------
-# TAB 4: DELETE TASK (FITUR BARU)
+# TAB 4: DELETE TASK
 # ------------------------------------------
 with tab_delete:
     st.subheader("Hapus Task Terdaftar")
@@ -256,22 +267,23 @@ with tab_delete:
             del_id = selected_del_option.split(" - ")[0]
             del_row = df_tasks[df_tasks["Task ID"] == del_id].iloc[0]
             
-            st.warning(f"⚠️ **PERHATIAN:** Anda akan menghapus task berikut secara permanen dari server database GitHub:")
+            st.warning(f"⚠️ **PERHATIAN:** Anda akan menghapus task berikut secara permanen:")
             st.code(f"ID: {del_row['Task ID']}\nNama Task: {del_row['Task Name']}\nPIC: {del_row['Assigned To']}")
             
             with st.form("delete_form"):
-                # Checkbox konfirmasi pengaman data
                 confirm_check = st.checkbox("Saya yakin ingin menghapus task ini secara permanen")
                 delete_btn = st.form_submit_button("🔴 Hapus Task Sekarang")
                 
                 if delete_btn:
                     if confirm_check:
-                        # Membuat dataframe baru dengan mengecualikan Task ID yang dipilih
+                        # Buat DataFrame baru tanpa task yang dihapus
                         filtered_df = df_tasks[df_tasks["Task ID"] != del_id]
                         
-                        # Simpan dataframe yang telah dikurangi ke GitHub
+                        # Update session state seketika
+                        st.session_state["master_df"] = filtered_df
+                        
                         save_data_to_github(repo, contents, filtered_df, message=f"Delete task {del_id}")
-                        st.success(f"🗑️ Sukses! Task **{del_id}** telah berhasil dihapus permanen.")
+                        st.success(f"🗑️ Sukses! Task **{del_id}** telah berhasil dihapus.")
                         st.rerun()
                     else:
                         st.error("❌ Gagal! Anda wajib mencentang kotak konfirmasi di atas terlebih dahulu.")
