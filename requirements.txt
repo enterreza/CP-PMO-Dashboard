@@ -4,3 +4,4 @@ plotly
 PyGithub
 streamlit-oauth
 openpyxl
+requests
