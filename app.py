@@ -106,13 +106,14 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
 # Inisialisasi komponen OAuth2 secara eksplisit dengan redirect URI
+# Masukkan variabel langsung secara berurutan tanpa nama parameter
 oauth2 = OAuth2Component(
-    client_id=CLIENT_ID,
-    client_secret=CLIENT_SECRET,
-    authorize_endpoint=AUTHORIZATION_URL,
-    token_endpoint=TOKEN_URL,
-    refresh_token_endpoint=TOKEN_URL,
-    revoke_endpoint=REVOKE_URL
+    CLIENT_ID,
+    CLIENT_SECRET,
+    AUTHORIZATION_URL,
+    TOKEN_URL,
+    TOKEN_URL,
+    REVOKE_URL
 )
 
 # ==========================================
