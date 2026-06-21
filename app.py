@@ -16,6 +16,7 @@ from io import BytesIO
 # ==========================================
 st.set_page_config(page_title="CP-PMO Smartsheet Workspace", layout="wide")
 
+# Injeksi CSS Khusus untuk Mengubah UI Menjadi Gaya Smartsheet
 st.markdown("""
     <style>
         html, body, [data-testid="stMarkdownContainer"] {
@@ -208,12 +209,15 @@ def load_data(contents):
     else:
         df = pd.DataFrame(data_json)
     
+    # Proteksi total terhadap nilai kosong/NaN agar tidak merusak Dropdown Streamlit
     for col in columns:
         if col not in df.columns:
             if col == "Project Name":
                 df[col] = "Project Utama"
             else:
                 df[col] = ""
+        else:
+            df[col] = df[col].fillna("")
             
     st.session_state["master_df"] = df[columns]
     return df[columns]
@@ -336,7 +340,7 @@ with active_tabs[0]:
 # HAK AKSES KHUSUS ADMINISTRATOR
 # ------------------------------------------
 if is_admin:
-    # TAB 2: TAMBAH PROYEK / TASK BARU (Dropdown Parent Task Integration)
+    # TAB 2: TAMBAH PROYEK / TASK BARU (Dengan Dropdown Pengaman)
     with active_tabs[1]:
         st.subheader("Add New Project, Task, or Subtask")
         existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Project Utama"]
@@ -347,21 +351,25 @@ if is_admin:
                 project_name_select = st.selectbox("📂 Pilih Projek Eksis:", ["-- Tulis Projek Baru --"] + existing_projects)
                 project_name_custom = st.text_input("📝 Tulis Nama Projek Baru (Jika opsi di atas 'Tulis Projek Baru'):")
                 
-                # --- LOGIKA DROPDOWN MENU TASK UTAMA ---
-                # Mengambil daftar Task Utama yang sudah terdaftar dari DB agar bisa dipilih langsung
+                # Saring data agar menghasilkan list Task Utama yang bersih untuk Dropdown
                 existing_main_tasks = []
                 if not df_tasks.empty:
-                    # Ambil task unik yang bernilai isi
-                    existing_main_tasks = sorted(df_tasks["Task Name"].dropna().unique().tolist())
+                    tasks_series = df_tasks["Task Name"].astype(str).str.strip()
+                    existing_main_tasks = sorted(tasks_series[tasks_series != ""].unique().tolist())
                 
-                task_mode = st.radio("Jenis Input Kegiatan:", ["Buat Task Utama Baru", "Pilih Task Utama dari Dropdown (Untuk Subtask)"], horizontal=True)
+                # Cek ketersediaan data untuk memunculkan radio button secara kondisional
+                if existing_main_tasks:
+                    task_mode = st.radio("Jenis Input Kegiatan:", ["Buat Task Utama Baru", "Pilih Task Utama dari Dropdown (Untuk Subtask)"], horizontal=True)
+                else:
+                    st.info("💡 Belum ada Task Utama di database. Silakan buat 'Task Utama Baru' terlebih dahulu.")
+                    task_mode = "Buat Task Utama Baru"
                 
                 if task_mode == "Buat Task Utama Baru":
                     task_name = st.text_input("Nama Task Utama Baru:")
                 else:
-                    task_name = st.selectbox("Pilih Task Utama Terdaftar:", existing_main_tasks if existing_main_tasks else ["Belum ada Task Utama"])
+                    task_name = st.selectbox("Pilih Task Utama Terdaftar:", existing_main_tasks)
                 
-                subtask_name = st.text_input("Subtask Name (Isi jika ini adalah bagian dari Task Utama)")
+                subtask_name = st.text_input("Subtask Name (Kosongkan jika ini adalah Task Utama itu sendiri)")
                 assigned = st.text_input("Assigned To (PIC Name)")
             with col_b:
                 status = st.selectbox("Allocation Status", STATUS_OPTIONS)
@@ -383,11 +391,11 @@ if is_admin:
             if submit_btn:
                 final_project_name = project_name_custom if project_name_select == "-- Tulis Projek Baru --" else project_name_select
                 
-                if final_project_name.strip() != "" and task_name and task_name != "Belum ada Task Utama" and assigned:
+                if final_project_name.strip() != "" and task_name and assigned:
                     new_id = f"TSK-{len(df_tasks) + 1:03d}"
                     new_task = {
-                        "Task ID": new_id, "Project Name": final_project_name.strip(), "Task Name": task_name, 
-                        "Subtask": subtask_name, "Assigned To": assigned, "Status": status, "Progress (%)": int(progress), 
+                        "Task ID": new_id, "Project Name": final_project_name.strip(), "Task Name": task_name.strip(), 
+                        "Subtask": subtask_name.strip(), "Assigned To": assigned.strip(), "Status": status, "Progress (%)": int(progress), 
                         "Start Date": str(start_date), "Due Date": str(due_date), "Issues/Kendala": issues_val,
                         "Follow Up/Tindak Lanjut": follow_up_val, "Notes": notes, "GDrive Link": gdrive_link
                     }
