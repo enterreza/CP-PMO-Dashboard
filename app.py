@@ -338,44 +338,49 @@ with active_tabs[0]:
 # HAK AKSES KHUSUS ADMINISTRATOR
 # ------------------------------------------
 if is_admin:
-    # TAB 2: TAMBAH PROYEK / TASK BARU (Perbaikan Reaktivitas Dropdown)
+    # TAB 2: TAMBAH PROYEK / TASK BARU (Hierarki: Nama Projek -> Nama Task -> Nama Subtask)
     with active_tabs[1]:
-        st.subheader("Add New Project, Task, or Subtask")
+        st.subheader("Add New Row (Project → Task → Subtask)")
         
-        # 1. Ambil list Task Utama yang bersih
+        # Saring data agar menghasilkan list Task Utama yang bersih untuk Dropdown
         existing_main_tasks = []
         if not df_tasks.empty:
             tasks_series = df_tasks["Task Name"].astype(str).str.strip()
             existing_main_tasks = sorted(tasks_series[tasks_series != ""].unique().tolist())
             
-        # 2. Letakkan Radio Pilihan di luar Form agar langsung memicu perubahan layar
+        existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Project Utama"]
+        
+        # 1. Pilih atau Tulis Nama Projek Utama terlebih dahulu
+        project_name_select = st.selectbox("📂 [1] Pilih Projek Eksis:", ["-- Tulis Projek Baru --"] + existing_projects)
+        if project_name_select == "-- Tulis Projek Baru --":
+            project_name_custom = st.text_input("📝 Tulis Nama Projek Baru:")
+        else:
+            project_name_custom = ""
+
+        # 2. Tentukan Mode Pengisian Task Utama (Dropdown atau Manual Baru)
         if existing_main_tasks:
             task_mode = st.radio(
-                "Jenis Input Kegiatan:", 
-                ["Buat Task Utama Baru", "Pilih Task Utama dari Dropdown (Untuk Subtask)"], 
+                "Metode Pengisian Task Utama:", 
+                ["Buat Task Utama Baru (Ketik Manual)", "Pilih dari Dropdown Task Utama yang Sudah Ada"], 
                 horizontal=True,
                 key="task_mode_selector"
             )
         else:
-            st.info("💡 Belum ada Task Utama di database. Silakan buat 'Task Utama Baru' terlebih dahulu.")
-            task_mode = "Buat Task Utama Baru"
+            st.info("💡 Belum ada Task Utama terdaftar. Silakan pilih opsi ketik manual.")
+            task_mode = "Buat Task Utama Baru (Ketik Manual)"
             
-        existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Project Utama"]
-        
-        # 3. Mulai Form Input
+        # 3. Mulai Form Utama untuk Pengisian Sisa Atribut Kolom
         with st.form("input_form", clear_on_submit=True):
             col_a, col_b = st.columns(2)
             with col_a:
-                project_name_select = st.selectbox("📂 Pilih Projek Eksis:", ["-- Tulis Projek Baru --"] + existing_projects)
-                project_name_custom = st.text_input("📝 Tulis Nama Projek Baru (Jika opsi di atas 'Tulis Projek Baru'):")
-                
-                # Menampilkan widget input dinamis sesuai pilihan radio di luar form tadi
-                if task_mode == "Buat Task Utama Baru":
-                    task_name = st.text_input("Nama Task Utama Baru:")
+                # [2] Penentuan Nama Task Utama berdasarkan pilihan radio di atas
+                if task_mode == "Buat Task Utama Baru (Ketik Manual)":
+                    task_name = st.text_input("⚙️ [2] Nama Task Utama:")
                 else:
-                    task_name = st.selectbox("Pilih Task Utama Terdaftar:", existing_main_tasks)
+                    task_name = st.selectbox("⚙️ [2] Pilih Task Utama dari Dropdown:", existing_main_tasks)
                 
-                subtask_name = st.text_input("Subtask Name (Kosongkan jika ini adalah Task Utama itu sendiri)")
+                # [3] Pengisian Subtask Name
+                subtask_name = st.text_input("🌿 [3] Nama Subtask (Kosongkan jika hanya ingin menginput Task Utama saja)")
                 assigned = st.text_input("Assigned To (PIC Name)")
             with col_b:
                 status = st.selectbox("Allocation Status", STATUS_OPTIONS)
@@ -395,6 +400,7 @@ if is_admin:
             submit_btn = st.form_submit_button("Insert Row to Workspace")
             
             if submit_btn:
+                # Tentukan nama projek final
                 final_project_name = project_name_custom if project_name_select == "-- Tulis Projek Baru --" else project_name_select
                 
                 if final_project_name.strip() != "" and task_name and assigned:
@@ -475,8 +481,6 @@ if is_admin:
                         save_data_to_github(repo, contents, df_tasks, message=f"Update row {selected_id}")
                         st.success(f"💾 Perubahan baris data **{selected_id}** sukses disimpan!")
                         st.rerun()
-        else:
-            st.info("ℹ️ Tidak ada data untuk dimodifikasi.")
 
     # TAB 4: HAPUS BARIS DATA
     with active_tabs[3]:
@@ -487,7 +491,7 @@ if is_admin:
             
             if selected_del_option:
                 del_id = selected_del_option.split(" - ")[0]
-                del_row = df_tasks[df_tasks["Task ID"] != del_id].iloc[0] # perbaikan pembacaan index hapus aman
+                del_row = df_tasks[df_tasks["Task ID"] != del_id].iloc[0]
                 
                 with st.form("delete_form"):
                     st.warning(f"Apakah Anda yakin menghapus Task dari Proyek: {del_row['Project Name']}?")
