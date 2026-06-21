@@ -5,25 +5,16 @@ import datetime
 import plotly.express as px
 from github import Github, Auth
 from github import GithubException
-from PIL import Image
+import requests # Pastikan library 'requests' ada di requirements.txt Anda
+from io import BytesIO
 
 # ==========================================
 # 1. KONFIGURASI AWAL & TAMPILAN
 # ==========================================
 st.set_page_config(page_title="CP-PMO Dashboard HMD", layout="wide")
 
-# Menampilkan Logo Korporat di Bagian Atas
-try:
-    logo = Image.open('uploaded:Logo HMD.png-1d560f77-823f-4533-83ab-0a6c2588bc87')
-    # Membuat 3 kolom untuk memposisikan logo di tengah atau kiri sesuai selera
-    col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
-    with col_logo1:
-        st.image(logo, width=200) # Sesuaikan lebar logo jika perlu
-except FileNotFoundError:
-    st.warning("⚠️ Berkas Logo HMD tidak ditemukan. Pastikan path-nya benar.")
-
 # Path file di repositori GitHub
-FILE_PATH = "tasks.json"  
+FILE_PATH = "tasks.json"
 
 # Mengambil kredensial dari Streamlit Secrets
 if "GITHUB_TOKEN" in st.secrets and "REPO_NAME" in st.secrets:
@@ -34,20 +25,58 @@ else:
     st.info("Silakan ke Dashboard Streamlit Cloud -> Settings -> Secrets, lalu tambahkan token Anda.")
     st.stop()
 
+# --- FUNGSI BARU: MEMUAT LOGO DARI GITHUB ---
+@st.cache_data
+def load_logo_from_github(repo_name, github_token):
+    """Memuat logo korporat langsung dari repositori GitHub secara mentah"""
+    try:
+        # Konstruksi URL raw GitHub
+        # Format: https://raw.githubusercontent.com/[USER]/[REPO]/[BRANCH]/[PATH_TO_FILE]
+        # Pastikan Branch Anda adalah 'main', atau ganti sesuai kebutuhan
+        raw_logo_url = f"https://raw.githubusercontent.com/{repo_name}/main/Logo HMD.png-1d560f77-823f-4533-83ab-0a6c2588bc87"
+        
+        # Gunakan token untuk autentikasi jika repositori bersifat privat
+        headers = {"Authorization": f"token {github_token}"}
+        
+        # Ambil gambar menggunakan requests
+        response = requests.get(raw_logo_url, headers=headers)
+        
+        if response.status_value == 200:
+            # Ubah konten biner menjadi file-like object
+            return BytesIO(response.content)
+        else:
+            st.warning(f"⚠️ Gagal memuat logo (Status: {response.status_value}). Periksa URL atau akses repositori.")
+            return None
+    except Exception as e:
+        st.warning(f"⚠️ Kesalahan saat memuat logo: {e}")
+        return None
+
+# Panggil fungsi untuk memuat logo
+logo_data = load_logo_from_github(REPO_NAME, GITHUB_TOKEN)
+
+# Tampilkan Logo jika berhasil dimuat
+if logo_data:
+    # Membuat 3 kolom untuk memposisikan logo di tengah atau kiri sesuai selera
+    col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
+    with col_logo1:
+        st.image(logo_data, width=200) # Sesuaikan lebar logo jika perlu
+else:
+    st.info("ℹ️ Logo HMD tidak ditampilkan karena masalah pemuatan.")
+
 # ==========================================
 # 2. FUNGSI INTEGRASI GITHUB API
 # ==========================================
 def get_github_file():
     """Mengambil file data tasks.json langsung dari repositori GitHub"""
     try:
-        auth = Auth.Token(GITHUB_TOKEN)
-        g = Github(auth=auth)
+        auth_gh = Auth.Token(GITHUB_TOKEN)
+        g = Github(auth=auth_gh)
         repo = g.get_repo(REPO_NAME)
         try:
             contents = repo.get_contents(FILE_PATH)
             return repo, contents
         except GithubException as e:
-            if e.status == 404:
+            if e.status_value == 404:
                 repo.create_file(FILE_PATH, "Initial commit for project management", "[]")
                 contents = repo.get_contents(FILE_PATH)
                 return repo, contents
@@ -98,7 +127,7 @@ def save_data_to_github(repo, contents, df):
 repo, contents = get_github_file()
 df_tasks = load_data(contents)
 
-st.title("🚀 CP-PMO Dashboard HMD")
+st.title("🚀 CP-PMO Dashboard HMD 2.1")
 st.write("Sistem manajemen tugas terintegrasi langsung dengan database repositori GitHub Anda.")
 
 if not df_tasks.empty:
