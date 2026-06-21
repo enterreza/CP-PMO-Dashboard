@@ -16,7 +16,6 @@ from io import BytesIO
 # ==========================================
 st.set_page_config(page_title="CP-PMO Smartsheet Workspace", layout="wide")
 
-# Injeksi CSS Khusus untuk Mengubah UI Menjadi Gaya Smartsheet
 st.markdown("""
     <style>
         html, body, [data-testid="stMarkdownContainer"] {
@@ -80,9 +79,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------
-# KONFIGURASI SECRETS (GITHUB & GOOGLE OAUTH)
-# ------------------------------------------
 if all(k in st.secrets for k in ["GITHUB_TOKEN", "REPO_NAME", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "REDIRECT_URI"]):
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     REPO_NAME = st.secrets["REPO_NAME"]
@@ -98,14 +94,8 @@ AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
-# Inisialisasi komponen OAuth2 menggunakan positional arguments (aman dari TypeError)
 oauth2 = OAuth2Component(
-    CLIENT_ID,
-    CLIENT_SECRET,
-    AUTHORIZATION_URL,
-    TOKEN_URL,
-    TOKEN_URL,
-    REVOKE_URL
+    CLIENT_ID, CLIENT_SECRET, AUTHORIZATION_URL, TOKEN_URL, TOKEN_URL, REVOKE_URL
 )
 
 # ==========================================
@@ -138,34 +128,25 @@ user_email = st.session_state["user_email"]
 user_name = st.session_state["user_name"]
 
 # ==========================================
-# 3. PENGATURAN HAK AKSES (LOWERCASE CHECK)
+# 3. PENGATURAN HAK AKSES & LOGO HMD
 # ==========================================
-ADMIN_EMAILS = [email.lower() for email in [
-    "enter.reza@gmail.com", 
-    "admin_pmo@gmail.com"
-]]
-
+ADMIN_EMAILS = [email.lower() for email in ["enter.reza@gmail.com", "admin_pmo@gmail.com"]]
 is_admin = user_email.lower() in ADMIN_EMAILS
 
-# --- MEMUAT & MENAMPILKAN LOGO HMD (FIXED SYSTEM) ---
 @st.cache_data
 def load_logo_from_github(repo_name, github_token):
     try:
         raw_logo_url = f"https://raw.githubusercontent.com/{repo_name}/main/Logo HMD.png"
         headers = {"Authorization": f"token {github_token}"}
         response = requests.get(raw_logo_url, headers=headers)
-        
-        # FIX: Menggunakan .status_code bukan .status_value
         if response.status_code == 200:
             return BytesIO(response.content)
-        else:
-            return None
+        return None
     except Exception:
         return None
 
 logo_data = load_logo_from_github(REPO_NAME, GITHUB_TOKEN)
 
-# Tata letak Header atas dengan Logo Perusahaan
 col_header1, col_header2 = st.columns([1, 4])
 with col_header1:
     if logo_data:
@@ -216,13 +197,19 @@ def load_data(contents):
     data_str = contents.decoded_content.decode('utf-8')
     data_json = json.loads(data_str)
     
-    columns = ["Task ID", "Project Name", "Task Name", "Assigned To", "Status", "Progress (%)", "Start Date", "Due Date", "Notes", "GDrive Link"]
+    # Menambahkan kolom baru: Subtask, Issues/Kendala, Follow Up
+    columns = [
+        "Task ID", "Project Name", "Task Name", "Subtask", "Assigned To", 
+        "Status", "Progress (%)", "Start Date", "Due Date", 
+        "Issues/Kendala", "Follow Up/Tindak Lanjut", "Notes", "GDrive Link"
+    ]
     
     if not data_json:
         df = pd.DataFrame(columns=columns)
     else:
         df = pd.DataFrame(data_json)
     
+    # Pengisian nilai default jika kolom baru belum ada di file JSON lama
     for col in columns:
         if col not in df.columns:
             if col == "Project Name":
@@ -243,13 +230,14 @@ df_tasks = load_data(contents)
 if not df_tasks.empty:
     df_tasks["Progress (%)"] = pd.to_numeric(df_tasks["Progress (%)"])
 
-# Pembagian Tab Navigasi berdasarkan Role
 if is_admin:
     tabs_list = ["📊 Portfolio & Gantt View", "➕ Tambah Proyek / Task Baru", "🔄 Edit Baris Data", "❌ Hapus Baris Data"]
 else:
     tabs_list = ["📊 Portfolio & Gantt View (Read Only)"]
 
 active_tabs = st.tabs(tabs_list)
+
+STATUS_OPTIONS = ["To Do", "In Progress", "Pending", "Done"]
 
 # ------------------------------------------
 # TAB 1: PORTFOLIO & FILTER GANTT VIEW + DOWNLOAD
@@ -295,12 +283,14 @@ with active_tabs[0]:
         avg_progress = df_filtered["Progress (%)"].mean() if total_tasks > 0 else 0
         completed_tasks = len(df_filtered[df_filtered["Status"] == "Done"])
         in_progress_tasks = len(df_filtered[df_filtered["Status"] == "In Progress"])
+        pending_tasks = len(df_filtered[df_filtered["Status"] == "Pending"])
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Total Rows Filtered", total_tasks)
         col2.metric("Project Avg Progress", f"{avg_progress:.1f}%")
         col3.metric("Tasks Completed", completed_tasks)
         col4.metric("Active In-Progress", in_progress_tasks)
+        col5.metric("Tasks Pending", pending_tasks)
         
         st.markdown("---")
         st.markdown("### 📅 Smartsheet Timeline Multi-Gantt")
@@ -310,17 +300,22 @@ with active_tabs[0]:
             df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce').fillna(pd.Timestamp(datetime.date.today()))
             df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce').fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
             
+            # Label Gantt Chart menggabungkan Task & Subtask jika ada
+            df_gantt["Display_Label"] = df_gantt.apply(
+                lambda r: f"{r['Task Name']} ({r['Subtask']})" if r['Subtask'] else r['Task Name'], axis=1
+            )
+            
             if project_filter == "✨ Tampilkan Semua Proyek":
-                df_gantt["Gantt_Label"] = df_gantt["Project Name"] + " - " + df_gantt["Task Name"]
+                df_gantt["Gantt_Label"] = df_gantt["Project Name"] + " - " + df_gantt["Display_Label"]
             else:
-                df_gantt["Gantt_Label"] = df_gantt["Task Name"]
+                df_gantt["Gantt_Label"] = df_gantt["Display_Label"]
                 
             fig_gantt = px.timeline(
                 df_gantt, x_start="Clean Start", x_end="Clean Due", y="Gantt_Label",
-                color="Status", text="Assigned To", hover_data=["Project Name", "Start Date", "Due Date", "Progress (%)"],
-                color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Done': '#A3E4D7'}
+                color="Status", text="Assigned To", hover_data=["Project Name", "Start Date", "Due Date", "Progress (%)", "Issues/Kendala"],
+                color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Pending': '#FFD966', 'Done': '#A3E4D7'}
             )
-            fig_gantt.update_layout(plot_bgcolor="white", paper_bgcolor="white", height=380, margin=dict(t=10, b=10, l=10, r=10), yaxis_title="")
+            fig_gantt.update_layout(plot_bgcolor="white", paper_bgcolor="white", height=400, margin=dict(t=10, b=10, l=10, r=10), yaxis_title="")
             fig_gantt.update_yaxes(categoryorder="category ascending")
             fig_gantt.update_xaxes(showgrid=True, gridcolor="#E2E4E8")
             fig_gantt.update_yaxes(showgrid=True, gridcolor="#E2E4E8")
@@ -338,7 +333,7 @@ with active_tabs[0]:
             }
         )
     else:
-        st.info("ℹ— Lembar kerja Anda kosong.")
+        st.info("ℹ️ Lembar kerja Anda kosong.")
 
 # ------------------------------------------
 # HAK AKSES KHUSUS ADMINISTRATOR
@@ -354,16 +349,24 @@ if is_admin:
             with col_a:
                 project_name_select = st.selectbox("📂 Pilih Projek Eksis (Atau tulis baru):", ["-- Tulis Projek Baru --"] + existing_projects)
                 project_name_custom = st.text_input("📝 Tulis Nama Projek Baru:")
-                task_name = st.text_input("Task Name / Activity Description")
+                task_name = st.text_input("Task Name / Main Activity")
+                subtask_name = st.text_input("Subtask Name (Optional)")
                 assigned = st.text_input("Assigned To (PIC Name)")
             with col_b:
-                status = st.selectbox("Allocation Status", ["To Do", "In Progress", "Done"])
+                status = st.selectbox("Allocation Status", STATUS_OPTIONS)
                 progress = st.slider("Progress (%)", 0, 100, 0 if status != "Done" else 100)
                 start_date = st.date_input("Start Date Plan", value=datetime.date.today())
                 due_date = st.date_input("Due Date Target", value=datetime.date.today() + datetime.timedelta(days=7))
+                gdrive_link = st.text_input("Google Drive Link Documentation")
                 
-            gdrive_link = st.text_input("Google Drive Link Documentation")
-            notes = st.text_area("Row Comments & Notes")
+            st.markdown("---")
+            col_c, col_d = st.columns(2)
+            with col_c:
+                issues_val = st.text_area("Issues / Kendala Lapangan")
+            with col_d:
+                follow_up_val = st.text_area("Follow Up / Tindak Lanjut Solusi")
+                
+            notes = st.text_area("General Comments & Notes")
             submit_btn = st.form_submit_button("Insert Row to Workspace")
             
             if submit_btn:
@@ -373,13 +376,14 @@ if is_admin:
                     new_id = f"TSK-{len(df_tasks) + 1:03d}"
                     new_task = {
                         "Task ID": new_id, "Project Name": final_project_name.strip(), "Task Name": task_name, 
-                        "Assigned To": assigned, "Status": status, "Progress (%)": int(progress), 
-                        "Start Date": str(start_date), "Due Date": str(due_date), "Notes": notes, "GDrive Link": gdrive_link
+                        "Subtask": subtask_name, "Assigned To": assigned, "Status": status, "Progress (%)": int(progress), 
+                        "Start Date": str(start_date), "Due Date": str(due_date), "Issues/Kendala": issues_val,
+                        "Follow Up/Tindak Lanjut": follow_up_val, "Notes": notes, "GDrive Link": gdrive_link
                     }
                     updated_df = pd.concat([df_tasks, pd.DataFrame([new_task])], ignore_index=True)
                     
                     st.session_state["master_df"] = updated_df
-                    save_data_to_github(repo, contents, updated_df, message=f"Insert row {new_id} for {final_project_name}")
+                    save_data_to_github(repo, contents, updated_df, message=f"Insert row {new_id}")
                     
                     st.success(f"🎉 Sukses! Task baru **{task_name}** ({new_id}) berhasil disimpan.")
                     st.balloons()
@@ -391,7 +395,7 @@ if is_admin:
     with active_tabs[2]:
         st.subheader("Update Sheet Row Values")
         if not df_tasks.empty:
-            task_options = [f"{row['Task ID']} - [{row['Project Name']}] {row['Task Name']}" for _, row in df_tasks.iterrows()]
+            task_options = [f"{row['Task ID']} - [{row['Project Name']}] {row['Task Name']} ({row['Subtask']})" for _, row in df_tasks.iterrows()]
             selected_option = st.selectbox("Pilih nomor indeks baris tugas:", task_options)
             
             if selected_option:
@@ -405,30 +409,42 @@ if is_admin:
                     st.info(f"Mengedit ID: {task_row['Task ID']} | Proyek: **{task_row['Project Name']}**")
                     col_u1, col_u2 = st.columns(2)
                     with col_u1:
-                        u_project = st.text_input("Ubah/Edit Nama Proyek", value=task_row["Project Name"])
+                        u_project = st.text_input("Ubah Nama Proyek", value=task_row["Project Name"])
                         u_task_name = st.text_input("Ubah Nama Task", value=task_row["Task Name"])
-                        current_status_idx = ["To Do", "In Progress", "Done"].index(task_row["Status"])
-                        u_status = st.selectbox("Update Status", ["To Do", "In Progress", "Done"], index=current_status_idx)
+                        u_subtask = st.text_input("Ubah Subtask", value=task_row["Subtask"])
+                        current_status_idx = STATUS_OPTIONS.index(task_row["Status"]) if task_row["Status"] in STATUS_OPTIONS else 0
+                        u_status = st.selectbox("Update Status", STATUS_OPTIONS, index=current_status_idx)
                     with col_u2:
+                        u_assigned = st.text_input("Ubah PIC", value=task_row["Assigned To"])
                         u_progress = st.slider("Update Progress (%)", 0, 100, int(task_row["Progress (%)"]))
                         u_start = st.date_input("Change Start Date", value=default_start)
                         u_due = st.date_input("Change Due Date", value=default_due)
                     
+                    st.markdown("---")
+                    col_u3, col_u4 = st.columns(2)
+                    with col_u3:
+                        u_issues = st.text_area("Change Issues / Kendala", value=task_row["Issues/Kendala"])
+                    with col_u4:
+                        u_follow_up = st.text_area("Change Follow Up / Tindak Lanjut", value=task_row["Follow Up/Tindak Lanjut"])
+                        
                     u_gdrive = st.text_input("Change GDrive URL Link", value=task_row["GDrive Link"])
                     u_notes = st.text_area("Change Comments/Notes", value=task_row["Notes"])
                     
                     if u_progress == 100: u_status = "Done"
-                    elif u_progress > 0 and u_status == "To Do": u_status = "In Progress"
                     
                     update_btn = st.form_submit_button("Commit Changes")
                     if update_btn:
                         idx = df_tasks[df_tasks["Task ID"] == selected_id].index[0]
                         df_tasks.at[idx, "Project Name"] = u_project
                         df_tasks.at[idx, "Task Name"] = u_task_name
+                        df_tasks.at[idx, "Subtask"] = u_subtask
+                        df_tasks.at[idx, "Assigned To"] = u_assigned
                         df_tasks.at[idx, "Status"] = u_status
                         df_tasks.at[idx, "Progress (%)"] = int(u_progress)
                         df_tasks.at[idx, "Start Date"] = str(u_start)
                         df_tasks.at[idx, "Due Date"] = str(u_due)
+                        df_tasks.at[idx, "Issues/Kendala"] = u_issues
+                        df_tasks.at[idx, "Follow Up/Tindak Lanjut"] = u_follow_up
                         df_tasks.at[idx, "Notes"] = u_notes
                         df_tasks.at[idx, "GDrive Link"] = u_gdrive
                         
