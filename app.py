@@ -197,7 +197,6 @@ def load_data(contents):
     data_str = contents.decoded_content.decode('utf-8')
     data_json = json.loads(data_str)
     
-    # Menambahkan kolom baru: Subtask, Issues/Kendala, Follow Up
     columns = [
         "Task ID", "Project Name", "Task Name", "Subtask", "Assigned To", 
         "Status", "Progress (%)", "Start Date", "Due Date", 
@@ -209,7 +208,6 @@ def load_data(contents):
     else:
         df = pd.DataFrame(data_json)
     
-    # Pengisian nilai default jika kolom baru belum ada di file JSON lama
     for col in columns:
         if col not in df.columns:
             if col == "Project Name":
@@ -300,9 +298,8 @@ with active_tabs[0]:
             df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce').fillna(pd.Timestamp(datetime.date.today()))
             df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce').fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
             
-            # Label Gantt Chart menggabungkan Task & Subtask jika ada
             df_gantt["Display_Label"] = df_gantt.apply(
-                lambda r: f"{r['Task Name']} ({r['Subtask']})" if r['Subtask'] else r['Task Name'], axis=1
+                lambda r: f"{r['Task Name']} → {r['Subtask']}" if r['Subtask'] else r['Task Name'], axis=1
             )
             
             if project_filter == "✨ Tampilkan Semua Proyek":
@@ -339,18 +336,32 @@ with active_tabs[0]:
 # HAK AKSES KHUSUS ADMINISTRATOR
 # ------------------------------------------
 if is_admin:
-    # TAB 2: TAMBAH PROYEK / TASK BARU
+    # TAB 2: TAMBAH PROYEK / TASK BARU (Dropdown Parent Task Integration)
     with active_tabs[1]:
-        st.subheader("Add New Project or Task Item")
+        st.subheader("Add New Project, Task, or Subtask")
         existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Project Utama"]
         
         with st.form("input_form", clear_on_submit=True):
             col_a, col_b = st.columns(2)
             with col_a:
-                project_name_select = st.selectbox("📂 Pilih Projek Eksis (Atau tulis baru):", ["-- Tulis Projek Baru --"] + existing_projects)
-                project_name_custom = st.text_input("📝 Tulis Nama Projek Baru:")
-                task_name = st.text_input("Task Name / Main Activity")
-                subtask_name = st.text_input("Subtask Name (Optional)")
+                project_name_select = st.selectbox("📂 Pilih Projek Eksis:", ["-- Tulis Projek Baru --"] + existing_projects)
+                project_name_custom = st.text_input("📝 Tulis Nama Projek Baru (Jika opsi di atas 'Tulis Projek Baru'):")
+                
+                # --- LOGIKA DROPDOWN MENU TASK UTAMA ---
+                # Mengambil daftar Task Utama yang sudah terdaftar dari DB agar bisa dipilih langsung
+                existing_main_tasks = []
+                if not df_tasks.empty:
+                    # Ambil task unik yang bernilai isi
+                    existing_main_tasks = sorted(df_tasks["Task Name"].dropna().unique().tolist())
+                
+                task_mode = st.radio("Jenis Input Kegiatan:", ["Buat Task Utama Baru", "Pilih Task Utama dari Dropdown (Untuk Subtask)"], horizontal=True)
+                
+                if task_mode == "Buat Task Utama Baru":
+                    task_name = st.text_input("Nama Task Utama Baru:")
+                else:
+                    task_name = st.selectbox("Pilih Task Utama Terdaftar:", existing_main_tasks if existing_main_tasks else ["Belum ada Task Utama"])
+                
+                subtask_name = st.text_input("Subtask Name (Isi jika ini adalah bagian dari Task Utama)")
                 assigned = st.text_input("Assigned To (PIC Name)")
             with col_b:
                 status = st.selectbox("Allocation Status", STATUS_OPTIONS)
@@ -372,7 +383,7 @@ if is_admin:
             if submit_btn:
                 final_project_name = project_name_custom if project_name_select == "-- Tulis Projek Baru --" else project_name_select
                 
-                if final_project_name.strip() != "" and task_name and assigned:
+                if final_project_name.strip() != "" and task_name and task_name != "Belum ada Task Utama" and assigned:
                     new_id = f"TSK-{len(df_tasks) + 1:03d}"
                     new_task = {
                         "Task ID": new_id, "Project Name": final_project_name.strip(), "Task Name": task_name, 
@@ -384,18 +395,16 @@ if is_admin:
                     
                     st.session_state["master_df"] = updated_df
                     save_data_to_github(repo, contents, updated_df, message=f"Insert row {new_id}")
-                    
-                    st.success(f"🎉 Sukses! Task baru **{task_name}** ({new_id}) berhasil disimpan.")
-                    st.balloons()
+                    st.success(f"🎉 Sukses! Data baris **{new_id}** berhasil disimpan.")
                     st.rerun()
                 else:
-                    st.error("❌ Nama Projek, Nama Task, dan PIC wajib diisi!")
+                    st.error("❌ Nama Projek, Nama Task Utama, dan PIC wajib diisi!")
 
     # TAB 3: EDIT BARIS DATA
     with active_tabs[2]:
         st.subheader("Update Sheet Row Values")
         if not df_tasks.empty:
-            task_options = [f"{row['Task ID']} - [{row['Project Name']}] {row['Task Name']} ({row['Subtask']})" for _, row in df_tasks.iterrows()]
+            task_options = [f"{row['Task ID']} - [{row['Project Name']}] {row['Task Name']} " + (f"({row['Subtask']})" if row['Subtask'] else "") for _, row in df_tasks.iterrows()]
             selected_option = st.selectbox("Pilih nomor indeks baris tugas:", task_options)
             
             if selected_option:
@@ -410,7 +419,7 @@ if is_admin:
                     col_u1, col_u2 = st.columns(2)
                     with col_u1:
                         u_project = st.text_input("Ubah Nama Proyek", value=task_row["Project Name"])
-                        u_task_name = st.text_input("Ubah Nama Task", value=task_row["Task Name"])
+                        u_task_name = st.text_input("Ubah Nama Task Utama", value=task_row["Task Name"])
                         u_subtask = st.text_input("Ubah Subtask", value=task_row["Subtask"])
                         current_status_idx = STATUS_OPTIONS.index(task_row["Status"]) if task_row["Status"] in STATUS_OPTIONS else 0
                         u_status = st.selectbox("Update Status", STATUS_OPTIONS, index=current_status_idx)
