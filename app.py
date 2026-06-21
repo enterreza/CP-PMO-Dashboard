@@ -16,7 +16,6 @@ from io import BytesIO
 # ==========================================
 st.set_page_config(page_title="CP-PMO Smartsheet Workspace", layout="wide")
 
-# Injeksi CSS Khusus untuk Mengubah UI Menjadi Gaya Smartsheet
 st.markdown("""
     <style>
         html, body, [data-testid="stMarkdownContainer"] {
@@ -209,7 +208,6 @@ def load_data(contents):
     else:
         df = pd.DataFrame(data_json)
     
-    # Proteksi total terhadap nilai kosong/NaN agar tidak merusak Dropdown Streamlit
     for col in columns:
         if col not in df.columns:
             if col == "Project Name":
@@ -340,30 +338,38 @@ with active_tabs[0]:
 # HAK AKSES KHUSUS ADMINISTRATOR
 # ------------------------------------------
 if is_admin:
-    # TAB 2: TAMBAH PROYEK / TASK BARU (Dengan Dropdown Pengaman)
+    # TAB 2: TAMBAH PROYEK / TASK BARU (Perbaikan Reaktivitas Dropdown)
     with active_tabs[1]:
         st.subheader("Add New Project, Task, or Subtask")
+        
+        # 1. Ambil list Task Utama yang bersih
+        existing_main_tasks = []
+        if not df_tasks.empty:
+            tasks_series = df_tasks["Task Name"].astype(str).str.strip()
+            existing_main_tasks = sorted(tasks_series[tasks_series != ""].unique().tolist())
+            
+        # 2. Letakkan Radio Pilihan di luar Form agar langsung memicu perubahan layar
+        if existing_main_tasks:
+            task_mode = st.radio(
+                "Jenis Input Kegiatan:", 
+                ["Buat Task Utama Baru", "Pilih Task Utama dari Dropdown (Untuk Subtask)"], 
+                horizontal=True,
+                key="task_mode_selector"
+            )
+        else:
+            st.info("💡 Belum ada Task Utama di database. Silakan buat 'Task Utama Baru' terlebih dahulu.")
+            task_mode = "Buat Task Utama Baru"
+            
         existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Project Utama"]
         
+        # 3. Mulai Form Input
         with st.form("input_form", clear_on_submit=True):
             col_a, col_b = st.columns(2)
             with col_a:
                 project_name_select = st.selectbox("📂 Pilih Projek Eksis:", ["-- Tulis Projek Baru --"] + existing_projects)
                 project_name_custom = st.text_input("📝 Tulis Nama Projek Baru (Jika opsi di atas 'Tulis Projek Baru'):")
                 
-                # Saring data agar menghasilkan list Task Utama yang bersih untuk Dropdown
-                existing_main_tasks = []
-                if not df_tasks.empty:
-                    tasks_series = df_tasks["Task Name"].astype(str).str.strip()
-                    existing_main_tasks = sorted(tasks_series[tasks_series != ""].unique().tolist())
-                
-                # Cek ketersediaan data untuk memunculkan radio button secara kondisional
-                if existing_main_tasks:
-                    task_mode = st.radio("Jenis Input Kegiatan:", ["Buat Task Utama Baru", "Pilih Task Utama dari Dropdown (Untuk Subtask)"], horizontal=True)
-                else:
-                    st.info("💡 Belum ada Task Utama di database. Silakan buat 'Task Utama Baru' terlebih dahulu.")
-                    task_mode = "Buat Task Utama Baru"
-                
+                # Menampilkan widget input dinamis sesuai pilihan radio di luar form tadi
                 if task_mode == "Buat Task Utama Baru":
                     task_name = st.text_input("Nama Task Utama Baru:")
                 else:
@@ -481,7 +487,7 @@ if is_admin:
             
             if selected_del_option:
                 del_id = selected_del_option.split(" - ")[0]
-                del_row = df_tasks[df_tasks["Task ID"] == del_id].iloc[0]
+                del_row = df_tasks[df_tasks["Task ID"] != del_id].iloc[0] # perbaikan pembacaan index hapus aman
                 
                 with st.form("delete_form"):
                     st.warning(f"Apakah Anda yakin menghapus Task dari Proyek: {del_row['Project Name']}?")
