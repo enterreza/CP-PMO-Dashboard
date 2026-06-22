@@ -309,13 +309,25 @@ with active_tabs[0]:
             else:
                 df_gantt["Gantt_Label"] = df_gantt["Display_Label"]
                 
+            # --- SOLUSI STRATEGIS: DYNAMIC CHART HEIGHT & PADDING ---
+            # Hitung tinggi grafik dinamis (minimal 300px, bertambah 45px per baris data agar tidak menumpuk)
+            dynamic_height = max(300, len(df_gantt) * 45)
+                
             fig_gantt = px.timeline(
                 df_gantt, x_start="Clean Start", x_end="Clean Due", y="Gantt_Label",
                 color="Status", text="Assigned To", hover_data=["Project Name", "Start Date", "Due Date", "Progress (%)", "Issues/Kendala"],
                 color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Pending': '#FFD966', 'Done': '#A3E4D7'}
             )
-            fig_gantt.update_layout(plot_bgcolor="white", paper_bgcolor="white", height=400, margin=dict(t=10, b=10, l=10, r=10), yaxis_title="")
-            fig_gantt.update_yaxes(categoryorder="category ascending")
+            
+            # Update Layout: Menambahkan margin kiri (l=250) agar teks label panjang tidak terpotong/menumpuk
+            fig_gantt.update_layout(
+                plot_bgcolor="white", 
+                paper_bgcolor="white", 
+                height=dynamic_height, 
+                margin=dict(t=30, b=20, l=250, r=15), 
+                yaxis_title=""
+            )
+            fig_gantt.update_yaxes(categoryorder="category ascending", tickmode="linear")
             fig_gantt.update_xaxes(showgrid=True, gridcolor="#E2E4E8")
             fig_gantt.update_yaxes(showgrid=True, gridcolor="#E2E4E8")
             st.plotly_chart(fig_gantt, use_container_width=True)
@@ -475,7 +487,7 @@ if is_admin:
                         st.success(f"💾 Perubahan baris data **{selected_id}** sukses disimpan!")
                         st.rerun()
 
-    # TAB 4: HAPUS BARIS DATA (FIXED INDEX ERROR SYSTEM)
+    # TAB 4: HAPUS BARIS DATA
     with active_tabs[3]:
         st.subheader("Remove Selected Row From Workspace")
         if not df_tasks.empty:
@@ -484,8 +496,6 @@ if is_admin:
             
             if selected_del_option:
                 del_id = selected_del_option.split(" - ")[0]
-                
-                # FIX: Mengubah operator filter dari '!=' menjadi '==' untuk mencocokkan target hapus dengan benar
                 del_row = df_tasks[df_tasks["Task ID"] == del_id].iloc[0]
                 
                 with st.form("delete_form"):
