@@ -370,14 +370,14 @@ if is_admin:
             col_a, col_b = st.columns(2)
             with col_a:
                 if task_mode == "Buat Task Utama Baru (Ketik Manual)":
-                    task_name = st.text_input("⚙️ [2] Nama Task Utama:")
+                    task_name = st.text_input("⚙️ Nama Task Utama:")
                 else:
-                    task_name = st.selectbox("⚙️ [2] Pilih Task Utama dari Dropdown:", existing_main_tasks)
+                    task_name = st.selectbox("⚙️ Pilih Task Utama dari Dropdown:", existing_main_tasks)
                 
-                subtask_name = st.text_input("🌿 [3] Nama Subtask (Kosongkan jika hanya ingin menginput Task Utama saja)")
+                subtask_name = st.text_input("🌿 Nama Subtask (Kosongkan jika hanya ingin menginput Task Utama saja)")
                 assigned = st.text_input("Assigned To (PIC Name)")
             with col_b:
-                status = st.selectbox("Allocation Status", STATUS_OPTIONS)
+                status = st.selectbox("Status", STATUS_OPTIONS)
                 progress = st.slider("Progress (%)", 0, 100, 0 if status != "Done" else 100)
                 start_date = st.date_input("Start Date Plan", value=datetime.date.today())
                 due_date = st.date_input("Due Date Target", value=datetime.date.today() + datetime.timedelta(days=7))
