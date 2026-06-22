@@ -294,7 +294,6 @@ with active_tabs[0]:
         
         st.markdown("---")
         
-        # Ambil penanda tanggal hari ini
         today_date = datetime.date.today()
         st.markdown(f"### 📅 Smartsheet Timeline *(Today: **{today_date.strftime('%d %B %Y')}**)*")
         
@@ -331,12 +330,12 @@ with active_tabs[0]:
             fig_gantt.update_xaxes(showgrid=True, gridcolor="#E2E4E8")
             fig_gantt.update_yaxes(showgrid=True, gridcolor="#E2E4E8")
             
-            # --- FITUR UTAMA BARU: MENAMBAHKAN INDIKATOR GARIS HARI INI (TODAY LINE) ---
+            # Perbaikan: Mengubah format objek tanggal hari ini menjadi format ISO string string demi kestabilan plotly
             fig_gantt.add_vline(
-                x=today_date, 
+                x=today_date.isoformat(), 
                 line_width=2.5, 
                 line_dash="dash", 
-                line_color="#E65100", # Warna Oranye Tua Korporat yang Kontras
+                line_color="#E65100", 
                 annotation_text="Hari Ini", 
                 annotation_position="top"
             )
