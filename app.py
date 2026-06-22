@@ -302,20 +302,29 @@ with active_tabs[0]:
             df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce').fillna(pd.Timestamp(today_date))
             df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce').fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
             
-            df_gantt["Display_Label"] = df_gantt.apply(
-                lambda r: f"{r['Task Name']} → {r['Subtask']}" if r['Subtask'] else r['Task Name'], axis=1
+            # --- MODIFIKASI LOGIKA SUMBU Y RINGKAS ---
+            # Jika baris memiliki nama subtask, tampilkan murni nama subtask. Jika kosong, pakai nama Task Utama.
+            df_gantt["Gantt_Label"] = df_gantt.apply(
+                lambda r: r['Subtask'] if str(r['Subtask']).strip() != "" else r['Task Name'], axis=1
             )
-            
-            if project_filter == "✨ Tampilkan Semua Project":
-                df_gantt["Gantt_Label"] = df_gantt["Project Name"] + " - " + df_gantt["Display_Label"]
-            else:
-                df_gantt["Gantt_Label"] = df_gantt["Display_Label"]
                 
             dynamic_height = max(300, len(df_gantt) * 45)
                 
             fig_gantt = px.timeline(
                 df_gantt, x_start="Clean Start", x_end="Clean Due", y="Gantt_Label",
-                color="Status", text="Assigned To", hover_data=["Project Name", "Start Date", "Due Date", "Progress (%)", "Issues/Kendala"],
+                color="Status", text="Assigned To",
+                # --- MODIFIKASI HOVER DATA (TOOLTIP) ---
+                # Memasukkan detail tingkat tinggi ke dalam interaksi arahkan kursor (hover)
+                hover_data={
+                    "Project Name": True,
+                    "Task Name": True,
+                    "Subtask": True,
+                    "Start Date": True,
+                    "Due Date": True,
+                    "Progress (%)": True,
+                    "Issues/Kendala": True,
+                    "Gantt_Label": False # Menyembunyikan duplikasi label sumbu Y pada tooltip
+                },
                 color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Pending': '#FFD966', 'Done': '#A3E4D7'}
             )
             
@@ -323,14 +332,13 @@ with active_tabs[0]:
                 plot_bgcolor="white", 
                 paper_bgcolor="white", 
                 height=dynamic_height, 
-                margin=dict(t=30, b=20, l=250, r=15), 
+                margin=dict(t=30, b=20, l=180, r=15), # Margin kiri bisa sedikit diperkecil karena teks sumbu Y sudah pendek
                 yaxis_title=""
             )
             fig_gantt.update_yaxes(categoryorder="category ascending", tickmode="linear")
             fig_gantt.update_xaxes(showgrid=True, gridcolor="#E2E4E8")
             fig_gantt.update_yaxes(showgrid=True, gridcolor="#E2E4E8")
             
-            # Perbaikan: Mengubah format objek tanggal hari ini menjadi format ISO string string demi kestabilan plotly
             fig_gantt.add_vline(
                 x=today_date.isoformat(), 
                 line_width=2.5, 
