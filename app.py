@@ -293,11 +293,14 @@ with active_tabs[0]:
         col5.metric("Tasks Pending", pending_tasks)
         
         st.markdown("---")
-        st.markdown("### 📅 Smartsheet Timeline")
+        
+        # Ambil penanda tanggal hari ini
+        today_date = datetime.date.today()
+        st.markdown(f"### 📅 Smartsheet Timeline *(Today: **{today_date.strftime('%d %B %Y')}**)*")
         
         if total_tasks > 0:
             df_gantt = df_filtered.copy()
-            df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce').fillna(pd.Timestamp(datetime.date.today()))
+            df_gantt["Clean Start"] = pd.to_datetime(df_gantt["Start Date"], errors='coerce').fillna(pd.Timestamp(today_date))
             df_gantt["Clean Due"] = pd.to_datetime(df_gantt["Due Date"], errors='coerce').fillna(df_gantt["Clean Start"] + pd.Timedelta(days=1))
             
             df_gantt["Display_Label"] = df_gantt.apply(
@@ -309,8 +312,6 @@ with active_tabs[0]:
             else:
                 df_gantt["Gantt_Label"] = df_gantt["Display_Label"]
                 
-            # --- SOLUSI STRATEGIS: DYNAMIC CHART HEIGHT & PADDING ---
-            # Hitung tinggi grafik dinamis (minimal 300px, bertambah 45px per baris data agar tidak menumpuk)
             dynamic_height = max(300, len(df_gantt) * 45)
                 
             fig_gantt = px.timeline(
@@ -319,7 +320,6 @@ with active_tabs[0]:
                 color_discrete_map={'To Do': '#FF8A8A', 'In Progress': '#7BC9FF', 'Pending': '#FFD966', 'Done': '#A3E4D7'}
             )
             
-            # Update Layout: Menambahkan margin kiri (l=250) agar teks label panjang tidak terpotong/menumpuk
             fig_gantt.update_layout(
                 plot_bgcolor="white", 
                 paper_bgcolor="white", 
@@ -330,6 +330,17 @@ with active_tabs[0]:
             fig_gantt.update_yaxes(categoryorder="category ascending", tickmode="linear")
             fig_gantt.update_xaxes(showgrid=True, gridcolor="#E2E4E8")
             fig_gantt.update_yaxes(showgrid=True, gridcolor="#E2E4E8")
+            
+            # --- FITUR UTAMA BARU: MENAMBAHKAN INDIKATOR GARIS HARI INI (TODAY LINE) ---
+            fig_gantt.add_vline(
+                x=today_date, 
+                line_width=2.5, 
+                line_dash="dash", 
+                line_color="#E65100", # Warna Oranye Tua Korporat yang Kontras
+                annotation_text="Hari Ini", 
+                annotation_position="top"
+            )
+            
             st.plotly_chart(fig_gantt, use_container_width=True)
         else:
             st.info("Tidak ada data kegiatan dalam project ini.")
