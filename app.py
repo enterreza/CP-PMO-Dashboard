@@ -231,7 +231,7 @@ if not df_tasks.empty:
     df_tasks["Progress (%)"] = pd.to_numeric(df_tasks["Progress (%)"])
 
 if is_admin:
-    tabs_list = ["📊 Portfolio & Gantt View", "➕ Tambah Proyek / Task Baru", "🔄 Edit Baris Data", "❌ Hapus Baris Data"]
+    tabs_list = ["📊 Portfolio & Gantt View", "➕ Tambah Project / Task Baru", "🔄 Edit Baris Data", "❌ Hapus Baris Data"]
 else:
     tabs_list = ["📊 Portfolio & Gantt View (Read Only)"]
 
@@ -243,16 +243,16 @@ STATUS_OPTIONS = ["To Do", "In Progress", "Pending", "Done"]
 # TAB 1: PORTFOLIO & FILTER GANTT VIEW + DOWNLOAD
 # ------------------------------------------
 with active_tabs[0]:
-    st.subheader("📋 CP-PMO Multi-Project Sheet Workspace")
+    st.subheader("📋 HMD Project Sheet Workspace")
     
     if not df_tasks.empty:
         available_projects = sorted(df_tasks["Project Name"].unique().tolist())
         
         col_filter1, col_filter2, col_download = st.columns([2, 2, 1])
         with col_filter1:
-            project_filter = st.selectbox("📂 Pilih Tampilan Proyek:", ["✨ Tampilkan Semua Proyek"] + available_projects)
+            project_filter = st.selectbox("📂 Pilih Tampilan Project:", ["✨ Tampilkan Semua Project"] + available_projects)
         
-        if project_filter == "✨ Tampilkan Semua Proyek":
+        if project_filter == "✨ Tampilkan Semua Project":
             df_filtered = df_tasks
             report_filename = f"PMO_Portfolio_Report_{datetime.date.today()}.xlsx"
         else:
@@ -293,7 +293,7 @@ with active_tabs[0]:
         col5.metric("Tasks Pending", pending_tasks)
         
         st.markdown("---")
-        st.markdown("### 📅 Smartsheet Timeline Multi-Gantt")
+        st.markdown("### 📅 Smartsheet Timeline")
         
         if total_tasks > 0:
             df_gantt = df_filtered.copy()
@@ -304,7 +304,7 @@ with active_tabs[0]:
                 lambda r: f"{r['Task Name']} → {r['Subtask']}" if r['Subtask'] else r['Task Name'], axis=1
             )
             
-            if project_filter == "✨ Tampilkan Semua Proyek":
+            if project_filter == "✨ Tampilkan Semua Project":
                 df_gantt["Gantt_Label"] = df_gantt["Project Name"] + " - " + df_gantt["Display_Label"]
             else:
                 df_gantt["Gantt_Label"] = df_gantt["Display_Label"]
@@ -320,7 +320,7 @@ with active_tabs[0]:
             fig_gantt.update_yaxes(showgrid=True, gridcolor="#E2E4E8")
             st.plotly_chart(fig_gantt, use_container_width=True)
         else:
-            st.info("Tidak ada data kegiatan dalam proyek ini.")
+            st.info("Tidak ada data kegiatan dalam project ini.")
 
         st.markdown("---")
         st.markdown("### 📄 Sheet Interactive Row Grid")
@@ -338,9 +338,9 @@ with active_tabs[0]:
 # HAK AKSES KHUSUS ADMINISTRATOR
 # ------------------------------------------
 if is_admin:
-    # TAB 2: TAMBAH PROYEK / TASK BARU
+    # TAB 2: TAMBAH PROJECT / TASK BARU
     with active_tabs[1]:
-        st.subheader("Add New Row (Project → Task → Subtask)")
+        st.subheader("Add New Row")
         
         existing_main_tasks = []
         if not df_tasks.empty:
@@ -349,9 +349,9 @@ if is_admin:
             
         existing_projects = sorted(df_tasks["Project Name"].unique().tolist()) if not df_tasks.empty else ["Project Utama"]
         
-        project_name_select = st.selectbox("📂 [1] Pilih Projek Eksis:", ["-- Tulis Projek Baru --"] + existing_projects)
-        if project_name_select == "-- Tulis Projek Baru --":
-            project_name_custom = st.text_input("📝 Tulis Nama Projek Baru:")
+        project_name_select = st.selectbox("📂 Pilih Project Eksis:", ["-- Tulis Project Baru --"] + existing_projects)
+        if project_name_select == "-- Tulis Project Baru --":
+            project_name_custom = st.text_input("📝 Tulis Nama Project Baru:")
         else:
             project_name_custom = ""
 
@@ -394,7 +394,7 @@ if is_admin:
             submit_btn = st.form_submit_button("Insert Row to Workspace")
             
             if submit_btn:
-                final_project_name = project_name_custom if project_name_select == "-- Tulis Projek Baru --" else project_name_select
+                final_project_name = project_name_custom if project_name_select == "-- Tulis Project Baru --" else project_name_select
                 
                 if final_project_name.strip() != "" and task_name and assigned:
                     new_id = f"TSK-{len(df_tasks) + 1:03d}"
@@ -411,7 +411,7 @@ if is_admin:
                     st.success(f"🎉 Sukses! Data baris **{new_id}** berhasil disimpan.")
                     st.rerun()
                 else:
-                    st.error("❌ Nama Projek, Nama Task Utama, dan PIC wajib diisi!")
+                    st.error("❌ Nama Project, Nama Task Utama, dan PIC wajib diisi!")
 
     # TAB 3: EDIT BARIS DATA
     with active_tabs[2]:
@@ -428,10 +428,10 @@ if is_admin:
                 default_due = pd.to_datetime(task_row["Due Date"]).date() if task_row["Due Date"] != "" else datetime.date.today()
                 
                 with st.form("update_form"):
-                    st.info(f"Mengedit ID: {task_row['Task ID']} | Proyek: **{task_row['Project Name']}**")
+                    st.info(f"Mengedit ID: {task_row['Task ID']} | Project: **{task_row['Project Name']}**")
                     col_u1, col_u2 = st.columns(2)
                     with col_u1:
-                        u_project = st.text_input("Ubah Nama Proyek", value=task_row["Project Name"])
+                        u_project = st.text_input("Ubah Nama Project", value=task_row["Project Name"])
                         u_task_name = st.text_input("Ubah Nama Task Utama", value=task_row["Task Name"])
                         u_subtask = st.text_input("Ubah Subtask", value=task_row["Subtask"])
                         current_status_idx = STATUS_OPTIONS.index(task_row["Status"]) if task_row["Status"] in STATUS_OPTIONS else 0
@@ -489,7 +489,7 @@ if is_admin:
                 del_row = df_tasks[df_tasks["Task ID"] == del_id].iloc[0]
                 
                 with st.form("delete_form"):
-                    st.warning(f"Apakah Anda yakin menghapus Task dari Proyek: {del_row['Project Name']}?")
+                    st.warning(f"Apakah Anda yakin menghapus Task dari Project: {del_row['Project Name']}?")
                     confirm_check = st.checkbox("Saya mengonfirmasi untuk melakukan penghapusan data ini")
                     delete_btn = st.form_submit_button("🔴 Delete Selected Row")
                     if delete_btn and confirm_check:
